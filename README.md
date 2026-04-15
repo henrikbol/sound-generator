@@ -8,8 +8,8 @@ Two approaches to generating sound files from raw data in pure Python — no DAW
 
 | Approach | Script | Input | Character |
 |---|---|---|---|
-| **Algorithmic generation** | `generate.py` | Nothing — sound is synthesised from formulas | Bytebeat patterns, white noise |
-| **Databending** | `databend.py` | Any binary file (image, executable, document…) | Glitch music, soundscapes, melodic textures |
+| [**Algorithmic generation**](#approach-1--algorithmic-generation-generatepy) | `generate.py` | Nothing — sound is synthesised from formulas | Bytebeat patterns, white noise |
+| [**Databending**](#approach-2--databending-databendpy) | `databend.py` | Any binary file (image, executable, document…) | Glitch music, soundscapes, melodic textures |
 
 ---
 
@@ -126,16 +126,16 @@ Databending is firmly rooted in **glitch music**. Pioneering practitioners inclu
 
 ### Requirements
 
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12+.
+
 ```bash
-# Uses uv with inline script dependencies — no manual pip install needed
+# Uses uv with inline script dependencies — no manual install needed
 uv run databend.py --help
 
-# Or install manually:
-pip install numpy scipy
-python databend.py --help
+# Or add dependencies explicitly:
+uv add numpy scipy
+uv run databend.py --help
 ```
-
-Requires Python 3.12+.
 
 ### Modes
 
@@ -271,8 +271,3 @@ The output WAVs are standard 16-bit / 44.1 kHz and drop straight into Ableton.
 - **Wikipedia: Data Sonification** — the broader scientific and artistic field
 - **Audacity Import Raw Data** — `File → Import → Raw Data` lets you audify any file without writing code; a good way to preview what a file sounds like before processing it
 
----
-
-## License
-
-MIT — do whatever you want with it.
