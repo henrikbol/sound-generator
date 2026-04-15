@@ -20,12 +20,11 @@ Requirements:
 # ///
 
 import argparse
-import struct
 import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.io import wavfile
+from scipy.io import wavfile  # type: ignore[import-untyped]
 
 SAMPLE_RATE = 44100
 
@@ -33,14 +32,14 @@ SAMPLE_RATE = 44100
 # Musical scale definitions (semitone offsets from root, root = MIDI 36 = C2)
 # ---------------------------------------------------------------------------
 SCALES: dict[str, list[int]] = {
-    "chromatic":  list(range(12)),
-    "major":      [0, 2, 4, 5, 7, 9, 11],
-    "minor":      [0, 2, 3, 5, 7, 8, 10],
+    "chromatic": list(range(12)),
+    "major": [0, 2, 4, 5, 7, 9, 11],
+    "minor": [0, 2, 3, 5, 7, 8, 10],
     "pentatonic": [0, 2, 4, 7, 9],
-    "phrygian":   [0, 1, 3, 5, 7, 8, 10],
-    "lydian":     [0, 2, 4, 6, 7, 9, 11],
-    "blues":      [0, 3, 5, 6, 7, 10],
-    "wholetone":  [0, 2, 4, 6, 8, 10],
+    "phrygian": [0, 1, 3, 5, 7, 8, 10],
+    "lydian": [0, 2, 4, 6, 7, 9, 11],
+    "blues": [0, 3, 5, 6, 7, 10],
+    "wholetone": [0, 2, 4, 6, 8, 10],
 }
 
 ROOT_MIDI = 36  # C2 — gives a rich low-mid range
@@ -105,6 +104,7 @@ def sine_tone(freq: float, duration_s: float, amplitude: float = 0.3) -> np.ndar
 # Mode 1: Audify
 # ---------------------------------------------------------------------------
 
+
 def mode_audify(data: bytes, sample_rate: int) -> np.ndarray:
     """Interpret raw bytes directly as a PCM waveform.
 
@@ -118,14 +118,17 @@ def mode_audify(data: bytes, sample_rate: int) -> np.ndarray:
     Returns:
         Normalised float32 audio array.
     """
-    print(f"  [audify] {len(data):,} bytes → {len(data) / 4:,.0f} samples "
-          f"→ {len(data) / 4 / sample_rate:.2f}s at {sample_rate} Hz")
+    print(
+        f"  [audify] {len(data):,} bytes → {len(data) / 4:,.0f} samples "
+        f"→ {len(data) / 4 / sample_rate:.2f}s at {sample_rate} Hz"
+    )
     return bytes_to_float32(data)
 
 
 # ---------------------------------------------------------------------------
 # Mode 2: Scale mapping
 # ---------------------------------------------------------------------------
+
 
 def mode_scale(
     data: bytes,
@@ -161,8 +164,10 @@ def mode_scale(
             pitch_table.append(midi_to_freq(midi))
 
     n_pitches = len(pitch_table)
-    print(f"  [scale] {len(data):,} bytes → {len(data)} notes "
-          f"at {bpm} BPM ({note_s * 1000:.1f} ms each) using '{scale_name}' scale")
+    print(
+        f"  [scale] {len(data):,} bytes → {len(data)} notes "
+        f"at {bpm} BPM ({note_s * 1000:.1f} ms each) using '{scale_name}' scale"
+    )
 
     chunks: list[np.ndarray] = []
     for byte_val in data:
@@ -178,6 +183,7 @@ def mode_scale(
 # ---------------------------------------------------------------------------
 # Mode 3: Granular
 # ---------------------------------------------------------------------------
+
 
 def mode_granular(
     data: bytes,
@@ -212,14 +218,16 @@ def mode_granular(
     output = np.zeros(total_samples, dtype=np.float32)
     envelope = np.hanning(grain_n).astype(np.float32)
 
-    print(f"  [granular] {len(data):,} bytes → {n_grains} grains "
-          f"× {grain_ms:.0f} ms, {density:.1f}× overlap → "
-          f"{total_samples / SAMPLE_RATE:.2f}s")
+    print(
+        f"  [granular] {len(data):,} bytes → {n_grains} grains "
+        f"× {grain_ms:.0f} ms, {density:.1f}× overlap → "
+        f"{total_samples / SAMPLE_RATE:.2f}s"
+    )
 
     rng = np.random.default_rng(seed=42)
 
     for i in range(n_grains):
-        grain_bytes = arr[i * grain_n: (i + 1) * grain_n]
+        grain_bytes = arr[i * grain_n : (i + 1) * grain_n]
 
         # White noise shaped by the byte-amplitude envelope
         noise = rng.standard_normal(grain_n).astype(np.float32)
@@ -228,7 +236,7 @@ def mode_granular(
         grain = noise * grain_bytes * envelope
 
         start = i * hop_n
-        output[start: start + grain_n] += grain
+        output[start : start + grain_n] += grain
 
     # Normalise
     peak = np.max(np.abs(output))
@@ -242,6 +250,7 @@ def mode_granular(
 # ---------------------------------------------------------------------------
 # Write WAV
 # ---------------------------------------------------------------------------
+
 
 def write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
     """Write a float32 array to a 16-bit WAV file.
@@ -262,6 +271,7 @@ def write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
@@ -284,12 +294,16 @@ Examples:
     p_a.add_argument("input", type=Path, help="Any binary file")
     p_a.add_argument("output", type=Path, help="Output .wav file")
     p_a.add_argument(
-        "--sample-rate", type=int, default=SAMPLE_RATE,
+        "--sample-rate",
+        type=int,
+        default=SAMPLE_RATE,
         help=f"Sample rate in Hz (default {SAMPLE_RATE}). "
-             "Lower = slower + darker; higher = faster + brighter",
+        "Lower = slower + darker; higher = faster + brighter",
     )
     p_a.add_argument(
-        "--max-bytes", type=int, default=None,
+        "--max-bytes",
+        type=int,
+        default=None,
         help="Limit input to first N bytes (useful for huge files)",
     )
 
@@ -298,28 +312,40 @@ Examples:
     p_s.add_argument("input", type=Path)
     p_s.add_argument("output", type=Path)
     p_s.add_argument(
-        "--scale", choices=list(SCALES), default="pentatonic",
+        "--scale",
+        choices=list(SCALES),
+        default="pentatonic",
         help="Musical scale (default: pentatonic)",
     )
     p_s.add_argument("--bpm", type=float, default=120.0, help="Tempo (default 120)")
     p_s.add_argument(
-        "--divisions", type=int, default=4,
+        "--divisions",
+        type=int,
+        default=4,
         help="Note grid: 1=quarter, 2=8th, 4=16th, 8=32nd notes (default 4)",
     )
-    p_s.add_argument("--max-bytes", type=int, default=512,
-                     help="Limit input bytes (default 512 — longer = very long file)")
+    p_s.add_argument(
+        "--max-bytes",
+        type=int,
+        default=512,
+        help="Limit input bytes (default 512 — longer = very long file)",
+    )
 
     # -- granular --
     p_g = sub.add_parser("granular", help="Bytes as noise-grain amplitudes")
     p_g.add_argument("input", type=Path)
     p_g.add_argument("output", type=Path)
     p_g.add_argument(
-        "--grain-ms", type=float, default=20.0,
+        "--grain-ms",
+        type=float,
+        default=20.0,
         help="Grain duration in milliseconds (default 20). "
-             "Shorter = granular buzz; longer = smoother texture",
+        "Shorter = granular buzz; longer = smoother texture",
     )
     p_g.add_argument(
-        "--density", type=float, default=2.0,
+        "--density",
+        type=float,
+        default=2.0,
         help="Grain overlap factor (default 2.0). Higher = denser wash",
     )
     p_g.add_argument("--max-bytes", type=int, default=None)
