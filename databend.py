@@ -151,7 +151,6 @@ def mode_scale(
         Float32 audio array.
     """
     scale = SCALES[scale_name]
-    n_scale = len(scale)
     beat_s = 60.0 / bpm
     note_s = beat_s / note_divisions
 

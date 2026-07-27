@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sound Generator</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230f1115'/%3E%3Cpath d='M2 8h2l1.5-4 2 8 2-6 1.5 2H14' stroke='%23f5a623' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Sound&nbsp;Generator</h1>
+    <span class="topbar-sub">noise · bytebeat · fm · harmonics · swarm · cloud · crackle · pluck</span>
+  </header>
+
+  <main class="layout">
+
+    <!-- ============ Controls panel ============ -->
+    <section class="panel controls" aria-label="Synthesis controls">
+      <div class="tabs" role="tablist" id="mode-tabs">
+        <button class="tab" role="tab" data-mode="random">Noise</button>
+        <button class="tab" role="tab" data-mode="bytebeat">Bytebeat</button>
+        <button class="tab" role="tab" data-mode="fm">FM</button>
+        <button class="tab" role="tab" data-mode="harmonics">Harmonics</button>
+        <button class="tab" role="tab" data-mode="swarm">Swarm</button>
+        <button class="tab" role="tab" data-mode="graincloud">Cloud</button>
+        <button class="tab" role="tab" data-mode="crackle">Crackle</button>
+        <button class="tab" role="tab" data-mode="pluck">Pluck</button>
+      </div>
+
+      <!-- Noise -->
+      <div class="pane" data-mode="random">
+        <div class="field">
+          <label for="noise-color">Color</label>
+          <select id="noise-color">
+            <option value="white">white — bright, hissy</option>
+            <option value="pink">pink — balanced, organic</option>
+            <option value="brown">brown — deep, rumbling</option>
+          </select>
+          <p class="hint" id="noise-color-hint">Flat spectrum — all frequencies at equal energy.</p>
+        </div>
+      </div>
+
+      <!-- Bytebeat / FM / Harmonics sliders are generated into these panes -->
+      <div class="pane" data-mode="bytebeat">
+        <p class="formula">(t &amp; (t &gt;&gt; a) | (t // b) ^ (t &gt;&gt; c) &amp; d) &amp; 0xFF</p>
+        <div class="param-mount" data-mount="bytebeat"></div>
+      </div>
+      <div class="pane" data-mode="fm">
+        <div class="param-mount" data-mount="fm"></div>
+      </div>
+      <div class="pane" data-mode="harmonics">
+        <div class="param-mount" data-mount="harmonics"></div>
+      </div>
+      <div class="pane" data-mode="swarm">
+        <div class="param-mount" data-mount="swarm"></div>
+      </div>
+      <div class="pane" data-mode="graincloud">
+        <div class="param-mount" data-mount="graincloud"></div>
+      </div>
+      <div class="pane" data-mode="crackle">
+        <div class="param-mount" data-mount="crackle"></div>
+      </div>
+      <div class="pane" data-mode="pluck">
+        <div class="param-mount" data-mount="pluck"></div>
+      </div>
+
+      <!-- Global -->
+      <div class="section-title">Global</div>
+      <div class="param-mount" data-mount="global"></div>
+      <div class="field">
+        <label for="sample-rate">Sample rate</label>
+        <select id="sample-rate">
+          <option value="22050">22050 Hz</option>
+          <option value="44100" selected>44100 Hz</option>
+          <option value="48000">48000 Hz</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="global-seed">Seed</label>
+        <div class="seed-row">
+          <input type="number" id="global-seed" step="1" placeholder="unpinned"
+                 title="Pin an integer seed for identical renders. Empty = rerolled by Generate.">
+          <button id="btn-reroll" class="btn btn-icon" title="Reroll seed and re-render" aria-label="Reroll seed">🎲</button>
+        </div>
+        <p class="hint">Pin an integer for identical renders. Empty = rerolled on Generate.</p>
+      </div>
+      <div class="field">
+        <label for="btn-stereo">Output</label>
+        <button id="btn-stereo" class="btn btn-toggle btn-small" aria-pressed="false"
+                title="Render a 2-channel stereo file">Stereo</button>
+      </div>
+
+      <!-- ADSR -->
+      <div class="section-title">Envelope <span class="section-note">applies to every mode</span></div>
+      <div class="param-mount" data-mount="adsr"></div>
+
+      <!-- Effects -->
+      <div class="section-title">Effects <span class="section-note">applies to every mode</span></div>
+      <div class="param-mount" data-mount="effects"></div>
+    </section>
+
+    <!-- ============ Waveform + transport, clip library ============ -->
+    <section class="stack">
+      <div class="panel scope" aria-label="Waveform and transport">
+        <div class="scope-canvas-wrap">
+          <canvas id="wave"></canvas>
+          <div class="scope-empty" id="scope-empty">no signal — hit Generate</div>
+        </div>
+        <div class="transport">
+          <button id="btn-generate" class="btn btn-accent">Generate</button>
+          <button id="btn-random" class="btn" title="Random values for the current mode's parameters and effects (envelope untouched)">Randomize</button>
+          <button id="btn-play" class="btn" disabled>Play</button>
+          <button id="btn-loop" class="btn btn-toggle" aria-pressed="false">Loop</button>
+          <button id="btn-auto" class="btn btn-toggle" aria-pressed="true"
+                  title="Re-render automatically 300 ms after any parameter change">Auto</button>
+          <div class="gain-wrap" title="Preview gain (playback only, not saved)">
+            <span class="gain-label">gain</span>
+            <input type="range" id="gain" min="0" max="1" step="0.01" value="0.8" aria-label="Preview gain">
+          </div>
+          <div class="transport-status">
+            <span id="render-status" class="render-status" hidden><span class="dot"></span>rendering…</span>
+            <span id="clip-duration" class="clip-duration">–</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel library" aria-label="Clip library">
+        <div class="library-head">
+          <h2>Clips</h2>
+          <span class="drag-hint" title="Browser drags reach Finder only — Ableton needs real file paths. Add the clips folder to Live's Places sidebar for native browsing.">Drag a clip to Finder — for Ableton, add the clips folder to Places</span>
+          <button id="btn-folder" class="btn btn-small" title="Reveal clips folder in Finder">Open&nbsp;folder</button>
+        </div>
+        <div class="save-row">
+          <input type="text" id="clip-name" placeholder="clip name" autocomplete="off" spellcheck="false" aria-label="Clip name">
+          <button id="btn-save" class="btn btn-accent btn-small">Save clip</button>
+        </div>
+        <ul class="clip-list" id="clip-list"></ul>
+        <div class="library-empty" id="library-empty" hidden>No clips yet — hit Save</div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+</body>
+</html>

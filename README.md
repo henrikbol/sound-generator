@@ -4,6 +4,38 @@ Two approaches to generating sound files from raw data in pure Python — no DAW
 
 ---
 
+## Web UI — quick start
+
+A local web frontend for `generate.py` — tweak parameters with sliders, pre-listen instantly, and collect clips for your DAW. The frontend is plain HTML/JS served by the backend — one command starts both, no build step:
+
+```bash
+# from the repo root
+uv run uvicorn ui.server:app --port 8765
+```
+
+Then open **http://localhost:8765** in your browser. Stop the server with `Ctrl+C`.
+
+Alternatives:
+
+```bash
+# without uvicorn on the command line (same server, fixed port 8765)
+uv run python ui/server.py
+
+# development — auto-restart when ui/server.py changes
+uv run uvicorn ui.server:app --port 8765 --reload
+
+# different port
+uv run uvicorn ui.server:app --port 9000
+```
+
+Saved clips land in `clips/` at the repo root (created on first save, gitignored).
+
+- **Modes** — Noise / Bytebeat / FM / Harmonics / Swarm / Cloud / Crackle / Pluck tabs expose every CLI parameter as a slider (hover any control for an explanation), plus the ADSR envelope, the effects chain (drive / wavefolder / bitcrusher), a stereo toggle, and a global seed control (pin a seed for reproducible textures; unpinned renders reroll on Generate and the saved clip always matches the last preview).
+- **Pre-listen** — clips render on the fly (auto-rerender as you drag sliders) and play in the browser with loop and gain control; the waveform is drawn on a canvas. A **Randomize** button rolls a fresh patch: random values for the current mode's parameters and the effects chain (frequencies drawn log-uniform, effects kept tasteful), leaving the envelope, duration, and output settings untouched.
+- **Clip library** — save named takes to the `clips/` folder, with per-clip download, reveal-in-Finder, and delete. Dragging a clip out of the browser works onto Finder/Desktop (Chrome delivers it as a file promise). **Ableton ignores browser drags** — it only accepts real file paths — so add the `clips/` folder to Live's browser sidebar once (**Places → Add Folder…**): every saved clip then appears directly in Ableton with native preview and drag. Or use the per-clip reveal button and drag from Finder.
+
+---
+
 ## Approaches
 
 | Approach | Script | Input | Character |
@@ -30,18 +62,33 @@ uv run generate.py <duration> [options]
 | `duration` | Length of audio in seconds |
 | `--output` | Output filename (default: `output.wav`) |
 | `--sample-rate` | Sample rate in Hz (default: `44100`) |
-| `--random` | Use random white noise (default mode) |
+| `--random` | Use random noise (default mode) |
 | `--bytebeat` | Use bytebeat algorithm |
+| `--fm` | Use FM synthesis |
+| `--harmonics` | Use layered harmonics |
+| `--swarm` | Use detuned drone swarm |
+| `--graincloud` | Use granular cloud |
+| `--crackle` | Use crackle/dust impulses |
+| `--pluck` | Use Karplus-Strong plucks |
+| `--stereo` | Render stereo output (any mode) |
+| `--seed` | RNG seed — makes any stochastic mode reproducible |
 
 ### Modes
 
-#### Random (white noise)
+#### Random (noise)
 
-Pure random 16-bit samples. All frequencies at equal energy. Useful as a baseline or noise source.
+Random noise in three colors, selected with `--noise-color`. Pass `--seed` to make the output reproducible.
+
+| Color | Spectrum | Character |
+|---|---|---|
+| `white` (default) | Flat | Bright, hissy — all frequencies at equal energy |
+| `pink` | 1/f | Balanced, organic — equal energy per octave |
+| `brown` | 1/f² | Deep, rumbling — like distant surf |
 
 ```bash
 uv run generate.py 5
-uv run generate.py 5 --output noise.wav
+uv run generate.py 5 --noise-color pink --output pink.wav
+uv run generate.py 5 --noise-color brown --seed 42
 ```
 
 #### Bytebeat
@@ -83,14 +130,193 @@ uv run generate.py 5 --bytebeat --bb-a 10 --bb-b 2 --bb-c 6 --bb-d 64
 uv run generate.py 5 --bytebeat --bb-a 8 --bb-b 11 --bb-c 2 --bb-d 192
 ```
 
-### Future Algorithms
+#### FM synthesis
 
-Planned additions for `generate.py`:
+A carrier sine wave is phase-modulated by a second oscillator running at `carrier × ratio` Hz. Integer ratios produce harmonic, bell-like tones; non-integer ratios produce inharmonic, metallic ones. The modulation index controls brightness — `0` is a pure sine, higher values add ever more sidebands.
 
-- **FM synthesis** — carrier wave modulated by a second oscillator; ratio and depth control the timbre from bell-like to metallic
-- **Layered harmonics** — stack sine waves at integer multiples of a base frequency with decreasing amplitude
-- **Pink/brown noise** — shaped random noise (`1/f`, `1/f²`) that sounds more organic than white noise
-- **ADSR envelope** — attack/decay/sustain/release shaping applied on top of any generator
+```bash
+uv run generate.py 5 --fm
+uv run generate.py 5 --fm --fm-freq 110 --fm-ratio 1.5 --fm-index 3
+```
+
+##### FM Parameters
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--fm-freq` | `220` | Carrier frequency (Hz) | Deep, bassy | High, piercing |
+| `--fm-ratio` | `2.0` | Modulator/carrier ratio | Smooth, harmonic | Clangorous, inharmonic |
+| `--fm-index` | `5.0` | Modulation depth | Pure, sine-like | Bright, noisy |
+
+##### Presets
+
+```bash
+# Bell — inharmonic ratio + decaying envelope
+uv run generate.py 3 --fm --fm-freq 440 --fm-ratio 3.5 --fm-index 8 --attack 0.005 --decay 2.5 --sustain 0
+
+# Metallic drone
+uv run generate.py 5 --fm --fm-freq 110 --fm-ratio 2.37 --fm-index 12
+
+# Soft FM bass
+uv run generate.py 5 --fm --fm-freq 55 --fm-ratio 1 --fm-index 2
+```
+
+#### Layered harmonics
+
+Stacks sine waves at integer multiples of a base frequency with amplitudes falling off as `1/n^decay`, normalised so the sum never clips. Partials above the Nyquist frequency are skipped automatically. `--harm-decay 1.0` matches a sawtooth's rolloff; higher values sound darker and rounder.
+
+```bash
+uv run generate.py 5 --harmonics
+uv run generate.py 5 --harmonics --harm-freq 220 --harm-count 12
+```
+
+##### Harmonics Parameters
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--harm-freq` | `110` | Base frequency (Hz) | Deep, bassy | High, thin |
+| `--harm-count` | `8` | Number of harmonics | Pure, flute-like | Rich, buzzy |
+| `--harm-decay` | `1.0` | Amplitude rolloff exponent | Bright, saw-like | Dark, round |
+| `--harm-stretch` | `0` | Inharmonicity (piano-string stretch) | Perfectly harmonic | Bell-like, detuned partials |
+| `--harm-odd` | off | Odd partials only (flag) | — | Hollow, clarinet-like |
+| `--harm-drift` | `0` | Slow per-partial amplitude LFO depth | Static tone | Evolving, breathing drone |
+
+##### Presets
+
+```bash
+# Organ-ish — slow rolloff, medium stack
+uv run generate.py 5 --harmonics --harm-freq 110 --harm-count 6 --harm-decay 0.5
+
+# Saw-like buzz — many harmonics, 1/n rolloff
+uv run generate.py 5 --harmonics --harm-freq 82.4 --harm-count 16 --harm-decay 1.0
+
+# Dark hum — steep rolloff
+uv run generate.py 5 --harmonics --harm-freq 55 --harm-count 8 --harm-decay 2.0
+
+# Evolving spectral drone — inharmonic partials, slow shimmer (great for granulation)
+uv run generate.py 20 --harmonics --harm-freq 82.4 --harm-count 16 --harm-stretch 0.008 --harm-drift 0.7 --stereo --seed 42
+```
+
+### Texture Generators
+
+Four stochastic generators built as chop/granulation fodder for a DAW. All are seedable (`--seed`) and stereo-capable (`--stereo`).
+
+#### Drone swarm
+
+Many detuned copies of a basic waveform, spread across the stereo field, with a slow random pitch wander per voice. Thick, beating, evolving — the classic granulation source.
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--swarm-freq` | `110` | Base frequency (Hz) | Deep drone | Screaming lead |
+| `--swarm-voices` | `7` | Oscillator voices (1–16) | Thin, focused | Massive, dense |
+| `--swarm-wave` | `saw` | Waveform: saw, sine, square, triangle | — | — |
+| `--swarm-detune` | `25` | Detune spread (cents) | Gentle chorus | Dissonant cluster |
+| `--swarm-drift` | `0.2` | Pitch-wander depth 0–1 | Static beating | Seasick, evolving |
+
+```bash
+# Classic supersaw pad
+uv run generate.py 15 --swarm --swarm-voices 9 --swarm-detune 30 --stereo
+
+# Deep sine drone, slow drift
+uv run generate.py 30 --swarm --swarm-freq 55 --swarm-wave sine --swarm-voices 5 --swarm-drift 0.6 --stereo
+```
+
+#### Grain cloud
+
+Stochastic micro-grains (Hanning-windowed sine bursts, or noise) scattered in time and pitch. Shimmering, spacious clouds — density and spread are the big handles.
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--gc-density` | `40` | Grains per second | Sparse droplets | Dense wash |
+| `--gc-grain-ms` | `60` | Grain length (ms) | Clicky, granular | Smooth, pad-like |
+| `--gc-pitch` | `440` | Centre pitch (Hz) | Dark cloud | Glassy sparkle |
+| `--gc-spread` | `12` | Pitch spread (± semitones) | Tonal, focused | Wide, atonal |
+| `--gc-source` | `sine` | Grain material: sine or noise | — | — |
+
+```bash
+# Shimmering tonal cloud
+uv run generate.py 20 --graincloud --gc-pitch 880 --gc-spread 7 --gc-density 60 --stereo
+
+# Airy noise wash
+uv run generate.py 15 --graincloud --gc-source noise --gc-grain-ms 120 --gc-density 80 --stereo
+```
+
+#### Crackle / dust
+
+Sparse random impulses with short resonant tails — squared-uniform amplitudes give many quiet ticks and a few loud pops. Vinyl crackle at low density, Geiger-counter dust at high density. Excellent rhythmic chop material.
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--ck-density` | `30` | Events per second | Lonely pops | Frying-pan sizzle |
+| `--ck-tone` | `2500` | Centre resonance (Hz) | Woody knocks | Glassy ticks |
+| `--ck-decay-ms` | `6` | Tail time-constant (ms) | Dry clicks | Ringing pings |
+
+```bash
+# Vinyl surface noise
+uv run generate.py 20 --crackle --ck-density 12 --ck-tone 1800 --stereo
+
+# Dense metallic dust
+uv run generate.py 10 --crackle --ck-density 300 --ck-tone 5000 --ck-decay-ms 15 --stereo
+```
+
+#### Karplus-Strong plucks
+
+Physically-modelled plucked strings (two delay lines, re-excited on a clock). Organic, woody attacks that granulate beautifully. In stereo the two strings sit left/right for a ping-pong feel.
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--pk-freq` | `220` | String frequency (Hz, 20–2000) | Bassy thumps | Harp-like plinks |
+| `--pk-decay` | `0.6` | Ring length 0–1 | Muted, dampened | Endless sustain |
+| `--pk-interval` | `0.5` | Seconds between plucks (0 = single) | Fast strumming | Meditative pulses |
+
+```bash
+# Slow meditative plucks
+uv run generate.py 20 --pluck --pk-freq 110 --pk-decay 0.9 --pk-interval 1.5 --stereo
+
+# Fast koto-like strum
+uv run generate.py 10 --pluck --pk-freq 440 --pk-decay 0.4 --pk-interval 0.12 --stereo
+```
+
+### ADSR Envelope
+
+An attack/decay/sustain/release amplitude envelope can be applied on top of **any** mode. The defaults are a no-op, so envelope-free invocations are unchanged. If attack + decay + release exceed the clip duration, the segments are scaled proportionally to fit.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--attack` | `0` | Fade-in time (seconds), 0 → 1 |
+| `--decay` | `0` | Time (seconds) to fall from 1 to the sustain level |
+| `--sustain` | `1.0` | Hold level (0–1) |
+| `--release` | `0` | Fade-out time (seconds), sustain → 0 |
+
+```bash
+# Percussive pluck out of a harmonics stack
+uv run generate.py 2 --harmonics --attack 0.005 --decay 0.4 --sustain 0.2 --release 1.0
+
+# Slow noise swell
+uv run generate.py 6 --noise-color pink --attack 3 --release 3
+```
+
+### Effects Chain
+
+A distortion chain applied to **any** mode, before the ADSR envelope (so fades stay clean for chopping). Signal order: drive → wavefolder → rate crush → bit crush. All defaults are exact no-ops.
+
+| Flag | Default | Effect | Character |
+|---|---|---|---|
+| `--drive` | `0` | tanh soft-clip saturation, 0–1 | Warm thickening → aggressive fuzz |
+| `--fold` | `0` | West-Coast wavefolder, 0–4 | Simple tones → complex buzzing spectra |
+| `--crush-bits` | `16` | Bit-depth reduction, 1–16 (16 = off) | Lo-fi grit below 8 bits |
+| `--crush-rate` | `0` | Sample-hold rate in Hz (0 = off) | Aliased, robotic downsampling |
+
+```bash
+# Folded FM — bell tone into buzzing metal
+uv run generate.py 5 --fm --fm-ratio 3.5 --fold 2.5
+
+# Saturated swarm with lo-fi crush
+uv run generate.py 10 --swarm --drive 0.5 --crush-bits 8 --crush-rate 11025 --stereo
+```
+
+### Stereo
+
+`--stereo` renders two channels for any mode: texture generators decorrelate naturally (per-voice/per-event panning), noise uses independent channels, harmonics decorrelates partial phases, FM detunes the right channel +6 cents, and bytebeat duplicates its mono signal. With a pinned `--seed`, the mono and stereo renders of a texture share the same events — toggling width never changes the performance.
 
 ---
 

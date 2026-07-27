@@ -10,6 +10,9 @@ wheels/
 .venv
 
 *.wav
+*.asd
+clips/
+.DS_Store
 *.mp3
 *.tif
 *.tiff
