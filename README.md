@@ -2,6 +2,8 @@
 
 Two approaches to generating sound files from raw data in pure Python — no DAW, no plugins, just code and math.
 
+**Requires [uv](https://docs.astral.sh/uv/).** Every command below is run through `uv run`, which resolves Python (3.12+) and all dependencies automatically — no manual installs, no virtualenvs to manage. Install uv once and everything works.
+
 ---
 
 ## Web UI — quick start
