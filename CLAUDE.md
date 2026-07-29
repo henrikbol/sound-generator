@@ -5,16 +5,17 @@ Pure-Python audio toy: synthesize WAV clips from formulas (the `generate` CLI), 
 ## Layout
 
 - `src/sound_generator/` — the synthesis package (installed editable via uv; `[project.scripts]` exposes `generate` and `databend`):
-  - `dsp.py` — shared helpers (`_pan_gains`, `_new_buffer`, `_add_event`, `_normalize`, `_waveform`) + constants (`NOISE_COLORS`, `WAVEFORMS`, `GRAIN_SOURCES`). Root of the import DAG — imports nothing from the package.
+  - `dsp.py` — shared helpers (`_pan_gains`, `_new_buffer`, `_add_event`, `_normalize`, `_waveform`) + constants (`NOISE_COLORS`, `WAVEFORMS`, `GRAIN_SOURCES`, `FILTER_TYPES`, `DRUM_TYPES`, `RISER_DIRECTIONS`, `MODAL_MATERIALS`). Root of the import DAG — imports nothing from the package.
   - `tones.py` — random (white/pink/brown noise), bytebeat, fm, harmonics.
-  - `textures.py` — swarm, graincloud, crackle, pluck.
-  - `effects.py` — `apply_effects` (drive/fold/bitcrush), `apply_adsr`.
+  - `textures.py` — swarm, graincloud, crackle, pluck, riser.
+  - `percussion.py` — drum one-shots (kick/snare/hihat/sub) and modal struck resonators (lazy `scipy.signal` import).
+  - `effects.py` — `apply_effects` (drive/fold/crush/resonant sweep filter), `apply_adsr`.
   - `wav.py` — `write_wav`.
   - `cli.py` — argparse + mode dispatch (`generate` entry point).
   - `databend.py` — standalone binary-file sonifier (audify/scale/granular modes; `databend` entry point). Independent of the rest of the package.
   - `__init__.py` — public API re-exports (generators, effects, `write_wav`, constants).
 - `ui/server.py` — FastAPI backend; `import sound_generator as generate`. `ui/static/` — vanilla-JS frontend (no build step, no CDN).
-- `tests/` — pytest suites mirroring the package: `test_contract.py` (cross-mode sample-contract invariants + parametrized generator lists), `test_tones.py`, `test_textures.py`, `test_effects.py`, `test_wav.py`, `test_server.py`, with shared spectral helpers in `tests/helpers.py`.
+- `tests/` — pytest suites mirroring the package: `test_contract.py` (cross-mode sample-contract invariants + parametrized generator lists), `test_tones.py`, `test_textures.py`, `test_percussion.py`, `test_effects.py`, `test_wav.py`, `test_server.py`, with shared spectral helpers in `tests/helpers.py`.
 - `clips/` — WAVs saved from the web UI (gitignored, created on demand).
 
 ## Commands
@@ -35,7 +36,7 @@ Run all four gates after every non-trivial change (see global workflow).
 - **Signal chain**: generator → `apply_effects` → `apply_adsr` → WAV. Effects and envelope default to exact no-ops.
 - **Seed discipline**: stochastic generators take `seed`; RNG draws happen in a fixed order regardless of channel count, so a pinned seed gives the same performance in mono and stereo. Never use global `np.random` — always `np.random.default_rng(seed)`.
 - **Adding a synthesis mode touches three layers**, each with a single extension point:
-  1. `src/sound_generator/`: `generate_<mode>()` in `tones.py` or `textures.py`, re-export in `__init__.py`, mutually-exclusive CLI flag + prefixed params (`--xx-*`) in `cli.py`. Tests go in the matching `tests/test_*.py` plus the parametrized lists in `tests/test_contract.py`.
+  1. `src/sound_generator/`: `generate_<mode>()` in `tones.py`, `textures.py`, or `percussion.py`, re-export in `__init__.py`, mutually-exclusive CLI flag + prefixed params (`--xx-*`) in `cli.py`. Tests go in the matching `tests/test_*.py` plus the parametrized lists in `tests/test_contract.py`.
   2. `ui/server.py`: `<X>Params` model, `<X>Render`/`<X>Clip` in both discriminated unions, one `isinstance` branch in `_synthesize`.
   3. `ui/static/app.js`: `state.params.<mode>` defaults, `PARAM_DEFS` entries, `suggestName()` case; tab + pane in `index.html`.
 - Frontend/backend API field names must match exactly (snake_case, e.g. `crush_bits`); the swarm API field `wave` maps to the `wave_shape` kwarg in dispatch.
@@ -45,6 +46,11 @@ Run all four gates after every non-trivial change (see global workflow).
 ## Gotchas
 
 - Karplus-Strong (`generate_pluck`): excitation noise must be mean-subtracted (the loop filter has unity DC gain) and the loop adds half a sample of delay — effective pitch is `sr / (period + 0.5)`.
+- scipy stays off the package's default import path — `scipy.signal.lfilter` is imported lazily inside the filter branch of `apply_effects` and inside `generate_modal`. Keep it that way (server startup and most tests never pay the import).
+- The resonant filter runs LAST in the effects chain and is gated on `filter_type != "off"` — when off it must not touch a single sample (the no-op contract is bit-exact, and tests lock it).
+- Drum one-shots put one hit at t=0 and pad shorter hits with silence; the filter's per-block denormal flush exists because those silent pads would otherwise stall `lfilter`.
+- `generate_modal` draws its per-mode pans for the FULL material table before Nyquist skipping, so the RNG draw order is independent of freq, sample rate, and channel count.
+- Frontend Randomize: `LOG_RANDOM_KEYS` matches by param key — a 0–1 param whose key collides with a Hz-param key (drum's `tone` vs crackle's `tone`) needs a `RANDOM_OVERRIDES` entry or it randomizes wrongly.
 - Spectral tests on windowed/granular material need wide tolerances (a 60 ms Hanning grain has a ~±30 Hz main lobe).
 - `tests/test_server.py` monkeypatches `server.CLIPS_DIR` — server code must resolve it at call time via the module global.
 - A user-level ruff config flags shebang lines in non-executable files — don't add shebangs.

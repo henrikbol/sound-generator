@@ -8,7 +8,7 @@
 /* ------------------------------ State --------------------------------- */
 
 // Modes whose params take a seed — fm/bytebeat are deterministic and never get one.
-const STOCHASTIC_MODES = ["random", "harmonics", "swarm", "graincloud", "crackle", "pluck"];
+const STOCHASTIC_MODES = ["random", "harmonics", "swarm", "graincloud", "crackle", "pluck", "riser", "drum", "modal"];
 
 function rollSeed() {
   return 1 + Math.floor(Math.random() * 0x7fffffff);
@@ -20,7 +20,7 @@ const state = {
   sampleRate: 44100,
   stereo: false,
   adsr: { attack: 0.0, decay: 0.0, sustain: 1.0, release: 0.0 },
-  effects: { drive: 0.0, fold: 0.0, crush_bits: 16, crush_rate: 0 },
+  effects: { drive: 0.0, fold: 0.0, crush_bits: 16, crush_rate: 0, filter_type: "off", cutoff: 1000, resonance: 0.707, cutoff_end: 0 },
   params: {
     random: { color: "white" },
     bytebeat: { a: 8, b: 5, c: 3, d: 128 },
@@ -30,6 +30,9 @@ const state = {
     graincloud: { density: 40, grain_ms: 60, pitch: 440.0, spread: 12, source: "sine" },
     crackle: { density: 30, tone: 2500, decay_ms: 6.0 },
     pluck: { freq: 220.0, decay: 0.6, interval: 0.5 },
+    riser: { freq: 110.0, octaves: 2.0, voices: 3, detune: 18, noise_mix: 0.5, curve: 2.0, direction: "up" },
+    drum: { drum_type: "kick", tune: 0, decay: 0.5, tone: 0.5 },
+    modal: { freq: 220.0, material: "bell", decay: 0.6, brightness: 0.75, interval: 0 },
   },
   pinnedSeed: null, // global seed input; null = unpinned
   rolledSeed: rollSeed(), // rerolled only by Generate / the dice button
@@ -160,6 +163,60 @@ const PARAM_DEFS = [
   { mount: "pluck", key: "interval", label: "interval s", min: 0, max: 10, step: 0.05,
     hint: "Strum clock — 0 = one pluck.",
     get: () => state.params.pluck.interval, set: (v) => (state.params.pluck.interval = v) },
+  // Riser
+  { mount: "riser", key: "freq", label: "start Hz", min: 20, max: 2000, step: 1,
+    hint: "Start pitch of the swept tone layer — the sweep climbs from here.",
+    get: () => state.params.riser.freq, set: (v) => (state.params.riser.freq = v) },
+  { mount: "riser", key: "octaves", label: "octaves", min: 0, max: 6, step: 0.1,
+    hint: "Sweep span — how far pitch travels over the clip.",
+    get: () => state.params.riser.octaves, set: (v) => (state.params.riser.octaves = v) },
+  { mount: "riser", key: "voices", label: "voices", min: 1, max: 8, step: 1,
+    hint: "Detuned saw voices. 1: clean sweep — more: thick ensemble rise.",
+    get: () => state.params.riser.voices, set: (v) => (state.params.riser.voices = v) },
+  { mount: "riser", key: "detune", label: "detune ¢", min: 0, max: 100, step: 1,
+    hint: "Voice spread in cents — beating thickness.",
+    get: () => state.params.riser.detune, set: (v) => (state.params.riser.detune = v) },
+  { mount: "riser", key: "noise_mix", label: "noise mix", min: 0, max: 1, step: 0.01,
+    hint: "0: pure swept tone — 1: pure noise crescendo.",
+    get: () => state.params.riser.noise_mix, set: (v) => (state.params.riser.noise_mix = v) },
+  { mount: "riser", key: "curve", label: "curve", min: 0.25, max: 6, step: 0.05,
+    hint: "Volume-ramp shape. 1: linear — high: slow start, explosive finish.",
+    get: () => state.params.riser.curve, set: (v) => (state.params.riser.curve = v) },
+  { mount: "riser", key: "direction", label: "direction", type: "select",
+    options: ["up", "down"],
+    hint: "up: riser — down: downlifter (falling, fading mirror).",
+    get: () => state.params.riser.direction, set: (v) => (state.params.riser.direction = v) },
+  // Drum
+  { mount: "drum", key: "drum_type", label: "type", type: "select",
+    options: ["kick", "snare", "hihat", "sub"],
+    hint: "One-shot recipe: kick, snare, hihat, or 808-style sub.",
+    get: () => state.params.drum.drum_type, set: (v) => (state.params.drum.drum_type = v) },
+  { mount: "drum", key: "tune", label: "tune st", min: -12, max: 12, step: 0.5,
+    hint: "Pitch offset in semitones.",
+    get: () => state.params.drum.tune, set: (v) => (state.params.drum.tune = v) },
+  { mount: "drum", key: "decay", label: "decay", min: 0, max: 1, step: 0.01,
+    hint: "Tail length. Tight hit → boomy ring; closed → open hat.",
+    get: () => state.params.drum.decay, set: (v) => (state.params.drum.decay = v) },
+  { mount: "drum", key: "tone", label: "tone", min: 0, max: 1, step: 0.01,
+    hint: "Dark → bright: click, snare snap, hat sizzle, sub drive.",
+    get: () => state.params.drum.tone, set: (v) => (state.params.drum.tone = v) },
+  // Modal
+  { mount: "modal", key: "freq", label: "freq Hz", min: 20, max: 4000, step: 1,
+    hint: "Fundamental of the resonator bank.",
+    get: () => state.params.modal.freq, set: (v) => (state.params.modal.freq = v) },
+  { mount: "modal", key: "material", label: "material", type: "select",
+    options: ["bar", "bell", "bowl", "wood"],
+    hint: "Mode table: metal bar, church bell, singing bowl, woodblock.",
+    get: () => state.params.modal.material, set: (v) => (state.params.modal.material = v) },
+  { mount: "modal", key: "decay", label: "decay", min: 0, max: 1, step: 0.01,
+    hint: "Ring time — woodblock tick to minute-long bowl.",
+    get: () => state.params.modal.decay, set: (v) => (state.params.modal.decay = v) },
+  { mount: "modal", key: "brightness", label: "brightness", min: 0, max: 1, step: 0.01,
+    hint: "High-mode weighting. Low: fundamental only — high: full spectrum.",
+    get: () => state.params.modal.brightness, set: (v) => (state.params.modal.brightness = v) },
+  { mount: "modal", key: "interval", label: "interval s", min: 0, max: 10, step: 0.05,
+    hint: "Strike clock — 0 = single hit.",
+    get: () => state.params.modal.interval, set: (v) => (state.params.modal.interval = v) },
   // Global
   { mount: "global", key: "duration", label: "duration s", min: 0.05, max: 30, step: 0.05,
     hint: "Clip length in seconds.",
@@ -190,6 +247,19 @@ const PARAM_DEFS = [
   { mount: "effects", key: "crush_rate", label: "crush Hz", min: 0, max: 16000, step: 100,
     hint: "Sample-rate crush; 0 = off.",
     get: () => state.effects.crush_rate, set: (v) => (state.effects.crush_rate = v) },
+  { mount: "effects", key: "filter_type", label: "filter", type: "select",
+    options: ["off", "lowpass", "bandpass", "highpass"],
+    hint: "Resonant filter, last in the chain. off = bypass.",
+    get: () => state.effects.filter_type, set: (v) => (state.effects.filter_type = v) },
+  { mount: "effects", key: "cutoff", label: "cutoff Hz", min: 20, max: 16000, step: 10,
+    hint: "Filter cutoff — the sweep start when a sweep target is set.",
+    get: () => state.effects.cutoff, set: (v) => (state.effects.cutoff = v) },
+  { mount: "effects", key: "resonance", label: "res Q", min: 0.5, max: 20, step: 0.1,
+    hint: "Peak at the cutoff. 0.7: flat — high: ringing, acid.",
+    get: () => state.effects.resonance, set: (v) => (state.effects.resonance = v) },
+  { mount: "effects", key: "cutoff_end", label: "sweep to Hz", min: 0, max: 16000, step: 10,
+    hint: "0 = static; otherwise the cutoff glides here over the clip.",
+    get: () => state.effects.cutoff_end, set: (v) => (state.effects.cutoff_end = v) },
 ];
 
 /* ----------------------------- Helpers -------------------------------- */
@@ -275,6 +345,15 @@ function suggestName() {
       break;
     case "pluck":
       name = `pluck-${fmtNum(p.pluck.freq)}-i${fmtNum(p.pluck.interval)}`;
+      break;
+    case "riser":
+      name = `riser-${p.riser.direction}-${fmtNum(p.riser.freq)}-o${fmtNum(p.riser.octaves)}`;
+      break;
+    case "drum":
+      name = `${p.drum.drum_type}-d${fmtNum(p.drum.decay)}-t${fmtNum(p.drum.tone)}`;
+      break;
+    case "modal":
+      name = `modal-${p.modal.material}-${fmtNum(p.modal.freq)}`;
       break;
   }
   return state.stereo ? `${name}-st` : name;
@@ -418,10 +497,19 @@ const LOG_RANDOM_KEYS = new Set(["carrier", "freq", "pitch", "tone"]);
 // Full-range uniforms are almost always harsh for these — use tamed draws.
 const RANDOM_OVERRIDES = {
   "pluck.interval": () => randomBetween(0.05, 2, 0.05),
+  // drum.tone is a 0-1 amount — without this it would hit the "tone"
+  // log-random key meant for crackle's tone-in-Hz.
+  "drum.tone": () => randomBetween(0, 1, 0.01),
+  "modal.interval": () => randomBetween(0, 2, 0.05),
   "effects.drive": () => (Math.random() < 0.35 ? 0 : randomBetween(0, 0.7, 0.01)),
   "effects.fold": () => (Math.random() < 0.5 ? 0 : randomBetween(0, 2, 0.05)),
   "effects.crush_bits": () => (Math.random() < 0.6 ? 16 : randomBetween(4, 12, 1)),
   "effects.crush_rate": () => (Math.random() < 0.6 ? 0 : randomBetween(2000, 12000, 100)),
+  "effects.filter_type": () =>
+    Math.random() < 0.5 ? "off" : ["lowpass", "bandpass", "highpass"][Math.floor(Math.random() * 3)],
+  "effects.cutoff": () => logRandomBetween(200, 8000, 10),
+  "effects.resonance": () => randomBetween(0.7, 6, 0.1),
+  "effects.cutoff_end": () => (Math.random() < 0.5 ? 0 : logRandomBetween(200, 8000, 10)),
 };
 
 function randomBetween(min, max, step) {

@@ -4,9 +4,13 @@ import numpy as np
 import pytest
 
 import sound_generator as generate
-from tests.helpers import spectrum
+from tests.helpers import spectral_centroid, spectrum
 
 SAMPLE_RATE = 8000
+
+
+def _rms(samples: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(samples**2)))
 
 
 def test_swarm_single_voice_peaks_at_freq() -> None:
@@ -61,3 +65,51 @@ def test_pluck_tail_decays() -> None:
     first_rms = float(np.sqrt(np.mean(samples[:half] ** 2)))
     second_rms = float(np.sqrt(np.mean(samples[half:] ** 2)))
     assert second_rms < first_rms * 0.5
+
+
+def test_riser_gets_louder() -> None:
+    samples = generate.generate_riser(2.0, SAMPLE_RATE, seed=1)
+    quarter = len(samples) // 4
+    assert _rms(samples[-quarter:]) > 2.0 * _rms(samples[:quarter])
+
+
+def test_riser_gets_brighter() -> None:
+    samples = generate.generate_riser(2.0, SAMPLE_RATE, noise_mix=1.0, seed=1)
+    quarter = len(samples) // 4
+    first = spectral_centroid(samples[:quarter], SAMPLE_RATE)
+    last = spectral_centroid(samples[-quarter:], SAMPLE_RATE)
+    assert last > first
+
+
+def test_riser_pitch_sweeps_up() -> None:
+    samples = generate.generate_riser(
+        2.0,
+        SAMPLE_RATE,
+        freq=110.0,
+        octaves=2.0,
+        voices=1,
+        detune=0.0,
+        noise_mix=0.0,
+        seed=1,
+    )
+    quarter = len(samples) // 4
+    first_freqs, first_mag = spectrum(samples[:quarter], SAMPLE_RATE)
+    last_freqs, last_mag = spectrum(samples[-quarter:], SAMPLE_RATE)
+    first_peak = first_freqs[np.argmax(first_mag)]
+    last_peak = last_freqs[np.argmax(last_mag)]
+    # Swept saw over a quarter-clip window — assert direction and rough span,
+    # not exact bins (windowed material needs wide tolerances).
+    assert first_peak < 250.0
+    assert last_peak > 280.0
+    assert last_peak / first_peak > 1.8
+
+
+def test_riser_down_fades_out() -> None:
+    samples = generate.generate_riser(2.0, SAMPLE_RATE, direction="down", seed=1)
+    quarter = len(samples) // 4
+    assert _rms(samples[:quarter]) > 2.0 * _rms(samples[-quarter:])
+
+
+def test_riser_rejects_unknown_direction() -> None:
+    with pytest.raises(ValueError, match="riser direction"):
+        generate.generate_riser(0.5, SAMPLE_RATE, direction="sideways")

@@ -4,6 +4,7 @@ import numpy as np
 
 from sound_generator.dsp import (
     GRAIN_SOURCES,
+    RISER_DIRECTIONS,
     _add_event,
     _new_buffer,
     _normalize,
@@ -194,6 +195,105 @@ def generate_crackle(
         )
         _add_event(buffer, start, gain * body, pan if stereo else 0.0)
     return _normalize(buffer, amplitude)
+
+
+def generate_riser(
+    duration_seconds: float,
+    sample_rate: int = 44100,
+    *,
+    freq: float = 110.0,
+    octaves: float = 2.0,
+    voices: int = 3,
+    detune: float = 18.0,
+    noise_mix: float = 0.5,
+    curve: float = 2.0,
+    direction: str = "up",
+    amplitude: float = 0.8,
+    seed: int | None = None,
+    stereo: bool = False,
+) -> np.ndarray:
+    """Generate a riser/downlifter: pitch, brightness, and volume ramp together.
+
+    A single ramp ``u`` runs 0→1 over the clip (mirrored for
+    ``direction="down"``) and drives everything: a detuned-saw layer sweeps
+    ``octaves`` octaves up from ``freq``, a noise layer crossfades from
+    pink (dark) to white (bright), and the output volume follows
+    ``u ** curve``. ``noise_mix`` balances the two layers. Downlifters are
+    the exact mirror — falling pitch, darkening noise, fading volume.
+
+    Args:
+        duration_seconds: Length of the audio in seconds.
+        sample_rate: Sample rate in Hz.
+        freq: Start pitch of the tone layer in Hz.
+        octaves: Pitch-sweep span in octaves.
+        voices: Number of detuned saw voices.
+        detune: Detune spread in cents.
+        noise_mix: Layer balance — 0 pure tone, 1 pure noise.
+        curve: Volume-ramp exponent (1 = linear, higher = late swell).
+        direction: One of RISER_DIRECTIONS.
+        amplitude: Peak amplitude (0–1).
+        seed: Optional RNG seed for reproducible output.
+        stereo: Pan voices across the field and decorrelate the noise.
+
+    Returns:
+        Float32 array of samples in [-1, 1], shape (n,) or (n, 2).
+    """
+    if direction not in RISER_DIRECTIONS:
+        raise ValueError(f"Unknown riser direction: {direction!r}")
+    num_samples = int(duration_seconds * sample_rate)
+    rng = np.random.default_rng(seed)
+    t = np.arange(num_samples) / sample_rate
+    u = t / duration_seconds
+    if direction == "down":
+        u = 1.0 - u
+
+    if voices > 1:
+        offsets = np.linspace(-detune / 2.0, detune / 2.0, voices)
+        pans = np.linspace(-0.7, 0.7, voices)
+    else:
+        offsets = np.zeros(1)
+        pans = np.zeros(1)
+    # Draws happen in a fixed order regardless of channel count so a
+    # pinned seed produces the same performance in mono and stereo.
+    offsets = offsets + rng.uniform(-1.0, 1.0, voices)
+
+    tone = _new_buffer(num_samples, stereo)
+    for offset, pan in zip(offsets, pans, strict=True):
+        phase0 = rng.uniform(0.0, 2.0 * np.pi)
+        inst_freq = freq * 2.0 ** (octaves * u + offset / 1200.0)
+        phase = 2.0 * np.pi * np.cumsum(inst_freq) / sample_rate + phase0
+        voice = _waveform(phase, "saw")
+        if stereo:
+            left, right = _pan_gains(pan)
+            tone[:, 0] += left * voice
+            tone[:, 1] += right * voice
+        else:
+            tone += voice
+    tone_peak = np.max(np.abs(tone))
+    if tone_peak > 0:
+        tone /= tone_peak
+
+    # Noise layer: always drawn (n, 2) — mono uses one column — so the RNG
+    # draw count never depends on the stereo flag.
+    white = rng.uniform(-1.0, 1.0, (num_samples, 2))
+    noise_spectrum = np.fft.rfft(white, axis=0)
+    fft_freqs = np.fft.rfftfreq(num_samples)
+    scale = np.zeros_like(fft_freqs)
+    nonzero = fft_freqs > 0
+    scale[nonzero] = 1.0 / fft_freqs[nonzero] ** 0.5
+    pink = np.fft.irfft(noise_spectrum * scale[:, np.newaxis], n=num_samples, axis=0)
+    pink_peak = np.max(np.abs(pink))
+    if pink_peak > 0:
+        pink /= pink_peak
+
+    if stereo:
+        blend = u[:, np.newaxis]
+        noise = (1.0 - blend) * pink + blend * white
+        out = ((1.0 - noise_mix) * tone + noise_mix * noise) * u[:, np.newaxis] ** curve
+    else:
+        noise = (1.0 - u) * pink[:, 0] + u * white[:, 0]
+        out = ((1.0 - noise_mix) * tone + noise_mix * noise) * u**curve
+    return _normalize(out, amplitude)
 
 
 def generate_pluck(

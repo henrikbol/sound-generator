@@ -11,7 +11,7 @@
 <body>
   <header class="topbar">
     <h1>Sound&nbsp;Generator</h1>
-    <span class="topbar-sub">noise · bytebeat · fm · harmonics · swarm · cloud · crackle · pluck</span>
+    <span class="topbar-sub">noise · bytebeat · fm · harmonics · swarm · cloud · crackle · pluck · riser · drums · modal</span>
   </header>
 
   <main class="layout">
@@ -27,6 +27,9 @@
         <button class="tab" role="tab" data-mode="graincloud">Cloud</button>
         <button class="tab" role="tab" data-mode="crackle">Crackle</button>
         <button class="tab" role="tab" data-mode="pluck">Pluck</button>
+        <button class="tab" role="tab" data-mode="riser">Riser</button>
+        <button class="tab" role="tab" data-mode="drum">Drums</button>
+        <button class="tab" role="tab" data-mode="modal">Modal</button>
       </div>
 
       <!-- Noise -->
@@ -64,6 +67,15 @@
       </div>
       <div class="pane" data-mode="pluck">
         <div class="param-mount" data-mount="pluck"></div>
+      </div>
+      <div class="pane" data-mode="riser">
+        <div class="param-mount" data-mount="riser"></div>
+      </div>
+      <div class="pane" data-mode="drum">
+        <div class="param-mount" data-mount="drum"></div>
+      </div>
+      <div class="pane" data-mode="modal">
+        <div class="param-mount" data-mount="modal"></div>
       </div>
 
       <!-- Global -->

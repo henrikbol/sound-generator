@@ -32,7 +32,7 @@ uv run uvicorn ui.server:app --port 9000
 
 Saved clips land in `clips/` at the repo root (created on first save, gitignored).
 
-- **Modes** — Noise / Bytebeat / FM / Harmonics / Swarm / Cloud / Crackle / Pluck tabs expose every CLI parameter as a slider (hover any control for an explanation), plus the ADSR envelope, the effects chain (drive / wavefolder / bitcrusher), a stereo toggle, and a global seed control (pin a seed for reproducible textures; unpinned renders reroll on Generate and the saved clip always matches the last preview).
+- **Modes** — Noise / Bytebeat / FM / Harmonics / Swarm / Cloud / Crackle / Pluck / Riser / Drums / Modal tabs expose every CLI parameter as a slider (hover any control for an explanation), plus the ADSR envelope, the effects chain (drive / wavefolder / bitcrusher / resonant filter), a stereo toggle, and a global seed control (pin a seed for reproducible textures; unpinned renders reroll on Generate and the saved clip always matches the last preview).
 - **Pre-listen** — clips render on the fly (auto-rerender as you drag sliders) and play in the browser with loop and gain control; the waveform is drawn on a canvas. A **Randomize** button rolls a fresh patch: random values for the current mode's parameters and the effects chain (frequencies drawn log-uniform, effects kept tasteful), leaving the envelope, duration, and output settings untouched.
 - **Clip library** — save named takes to the `clips/` folder, with per-clip download, reveal-in-Finder, and delete. Dragging a clip out of the browser works onto Finder/Desktop (Chrome delivers it as a file promise). **Ableton ignores browser drags** — it only accepts real file paths — so add the `clips/` folder to Live's browser sidebar once (**Places → Add Folder…**): every saved clip then appears directly in Ableton with native preview and drag. Or use the per-clip reveal button and drag from Finder.
 
@@ -72,6 +72,9 @@ uv run generate <duration> [options]
 | `--graincloud` | Use granular cloud |
 | `--crackle` | Use crackle/dust impulses |
 | `--pluck` | Use Karplus-Strong plucks |
+| `--riser` | Use riser/transition FX |
+| `--drum` | Use drum one-shot |
+| `--modal` | Use modal struck resonator |
 | `--stereo` | Render stereo output (any mode) |
 | `--seed` | RNG seed — makes any stochastic mode reproducible |
 
@@ -200,7 +203,7 @@ uv run generate 20 --harmonics --harm-freq 82.4 --harm-count 16 --harm-stretch 0
 
 ### Texture Generators
 
-Four stochastic generators built as chop/granulation fodder for a DAW. All are seedable (`--seed`) and stereo-capable (`--stereo`).
+Five stochastic generators built as chop/granulation fodder for a DAW. All are seedable (`--seed`) and stereo-capable (`--stereo`).
 
 #### Drone swarm
 
@@ -278,6 +281,90 @@ uv run generate 20 --pluck --pk-freq 110 --pk-decay 0.9 --pk-interval 1.5 --ster
 uv run generate 10 --pluck --pk-freq 440 --pk-decay 0.4 --pk-interval 0.12 --stereo
 ```
 
+#### Riser / transition FX
+
+Pitch, brightness, and volume ramp together over the clip: detuned saws sweep upward while a noise layer crossfades from dark pink to bright white. `--rs-direction down` mirrors everything into a downlifter. Arrangement glue — risers into drops, falling exits out of them.
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--rs-freq` | `110` | Start pitch (Hz) | Sub rumble rise | Screaming top |
+| `--rs-octaves` | `2.0` | Pitch-sweep span (octaves) | Subtle lift | Rocket launch |
+| `--rs-voices` | `3` | Detuned saw voices (1–8) | Clean sweep | Thick ensemble |
+| `--rs-detune` | `18` | Voice spread (cents) | Focused | Beating cluster |
+| `--rs-noise` | `0.5` | Noise mix 0–1 | Pure swept tone | Pure noise crescendo |
+| `--rs-curve` | `2.0` | Volume-ramp exponent | Linear swell | Explosive finish |
+| `--rs-direction` | `up` | `up` = riser, `down` = downlifter | — | — |
+
+```bash
+# Classic 8-second noise riser
+uv run generate 8 --riser --rs-noise 0.9 --rs-curve 3 --stereo
+
+# Tonal supersaw rise into a drop
+uv run generate 4 --riser --rs-noise 0.2 --rs-voices 6 --rs-octaves 3 --stereo --seed 7
+
+# Downlifter — falling, fading exit
+uv run generate 4 --riser --rs-direction down --stereo
+```
+
+### Percussion & Hits
+
+One-shots and struck resonances, built for Simpler and Drum Racks. Both are seedable; in stereo, drums duplicate the centred hit while modal spreads its partials across the field.
+
+#### Drum one-shots
+
+Four synthesized recipes selected with `--dr-type`: kick (pitch-swept sine + click), snare (two drum modes + bright noise), hihat (six-square inharmonic cluster — deterministic, no seed), and an 808-style sub. One hit lands at t=0; shorter hits are padded with silence, so `uv run generate 1 --drum` always gives a clean one-second file.
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--dr-type` | `kick` | kick, snare, hihat, sub | — | — |
+| `--dr-tune` | `0` | Pitch offset (± semitones) | Deeper | Higher |
+| `--dr-decay` | `0.5` | Tail length 0–1 | Tight, dry | Boomy / open |
+| `--dr-tone` | `0.5` | Brightness 0–1 | Dark, soft | Clicky, sizzly, driven |
+
+```bash
+# Tight punchy kick
+uv run generate 1 --drum --dr-type kick --dr-decay 0.3 --dr-tone 0.7
+
+# 808-style sub with long ring
+uv run generate 2 --drum --dr-type sub --dr-decay 0.9 --dr-tune -2
+
+# Open hat
+uv run generate 1 --drum --dr-type hihat --dr-decay 0.8 --dr-tone 0.6
+
+# Snappy snare
+uv run generate 1 --drum --dr-type snare --dr-tone 0.8 --seed 3
+```
+
+#### Modal resonator
+
+A bank of decaying two-pole resonators tuned to a material's mode table, struck by short noise bursts — mallet, bell, and bowl hits that granulate beautifully. `--md-interval` re-strikes on a clock (like pluck's strum).
+
+| Flag | Default | Role | Low values | High values |
+|---|---|---|---|---|
+| `--md-freq` | `220` | Fundamental (Hz) | Gong-like | Glassy chimes |
+| `--md-material` | `bell` | bar, bell, bowl, wood | — | — |
+| `--md-decay` | `0.6` | Ring time 0–1 | Damped tick | Minute-long ring |
+| `--md-brightness` | `0.75` | High-mode weighting 0–1 | Fundamental only | Full spectrum |
+| `--md-interval` | `0` | Seconds between strikes (0 = single) | Single hit | Meditative pulses |
+
+| Material | Character |
+|---|---|
+| `bar` | Struck metal bar — vibraphone / glockenspiel family |
+| `bell` | Church bell — Risset partials (hum, prime, tierce…) |
+| `bowl` | Singing bowl — longest, purest ring |
+| `wood` | Woodblock — few modes, heavily damped, clave-like |
+
+```bash
+# Singing bowl drone — strike every 2 s
+uv run generate 12 --modal --md-material bowl --md-interval 2 --md-decay 0.9 --stereo --seed 5
+
+# Woodblock clave
+uv run generate 1 --modal --md-material wood --md-freq 800 --md-decay 0.3
+
+# Church bell
+uv run generate 6 --modal --md-material bell --md-freq 110 --md-decay 0.8 --stereo
+```
+
 ### ADSR Envelope
 
 An attack/decay/sustain/release amplitude envelope can be applied on top of **any** mode. The defaults are a no-op, so envelope-free invocations are unchanged. If attack + decay + release exceed the clip duration, the segments are scaled proportionally to fit.
@@ -299,7 +386,7 @@ uv run generate 6 --noise-color pink --attack 3 --release 3
 
 ### Effects Chain
 
-A distortion chain applied to **any** mode, before the ADSR envelope (so fades stay clean for chopping). Signal order: drive → wavefolder → rate crush → bit crush. All defaults are exact no-ops.
+An effects chain applied to **any** mode, before the ADSR envelope (so fades stay clean for chopping). Signal order: drive → wavefolder → rate crush → bit crush → resonant filter — the filter runs last so it can tame and animate the harmonics the distortions add. All defaults are exact no-ops.
 
 | Flag | Default | Effect | Character |
 |---|---|---|---|
@@ -307,6 +394,10 @@ A distortion chain applied to **any** mode, before the ADSR envelope (so fades s
 | `--fold` | `0` | West-Coast wavefolder, 0–4 | Simple tones → complex buzzing spectra |
 | `--crush-bits` | `16` | Bit-depth reduction, 1–16 (16 = off) | Lo-fi grit below 8 bits |
 | `--crush-rate` | `0` | Sample-hold rate in Hz (0 = off) | Aliased, robotic downsampling |
+| `--filter` | `off` | Resonant filter: lowpass, bandpass, highpass | Subtractive shaping, sweeps |
+| `--cutoff` | `1000` | Filter cutoff in Hz (sweep start) | Dark → bright |
+| `--resonance` | `0.707` | Filter Q, 0.5–20 | Flat → ringing, acid |
+| `--cutoff-end` | `0` | Sweep target in Hz (0 = static) | Cutoff glides over the clip |
 
 ```bash
 # Folded FM — bell tone into buzzing metal
@@ -314,11 +405,14 @@ uv run generate 5 --fm --fm-ratio 3.5 --fold 2.5
 
 # Saturated swarm with lo-fi crush
 uv run generate 10 --swarm --drive 0.5 --crush-bits 8 --crush-rate 11025 --stereo
+
+# Acid sweep — crushed swarm through a screaming lowpass ramp
+uv run generate 8 --swarm --crush-bits 10 --filter lowpass --cutoff 200 --cutoff-end 4000 --resonance 8 --stereo
 ```
 
 ### Stereo
 
-`--stereo` renders two channels for any mode: texture generators decorrelate naturally (per-voice/per-event panning), noise uses independent channels, harmonics decorrelates partial phases, FM detunes the right channel +6 cents, and bytebeat duplicates its mono signal. With a pinned `--seed`, the mono and stereo renders of a texture share the same events — toggling width never changes the performance.
+`--stereo` renders two channels for any mode: texture generators decorrelate naturally (per-voice/per-event panning), noise uses independent channels, harmonics decorrelates partial phases, FM detunes the right channel +6 cents, and bytebeat duplicates its mono signal. Risers pan their saw voices and decorrelate the noise layer, modal gives each partial a static pan across the field, and drums duplicate the centred mono hit. With a pinned `--seed`, the mono and stereo renders of a texture share the same events — toggling width never changes the performance.
 
 ---
 

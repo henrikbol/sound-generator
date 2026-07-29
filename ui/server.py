@@ -38,12 +38,16 @@ class AdsrEnvelope(BaseModel):
 
 
 class EffectsParams(BaseModel):
-    """Distortion-chain settings whose defaults are an exact no-op."""
+    """Effects-chain settings whose defaults are an exact no-op."""
 
     drive: float = Field(default=0.0, ge=0.0, le=1.0)
     fold: float = Field(default=0.0, ge=0.0, le=4.0)
     crush_bits: int = Field(default=16, ge=1, le=16)
     crush_rate: float = Field(default=0.0, ge=0.0, le=96000.0)
+    filter_type: Literal["off", "lowpass", "bandpass", "highpass"] = "off"
+    cutoff: float = Field(default=1000.0, ge=10.0, le=20000.0)
+    resonance: float = Field(default=0.707, ge=0.5, le=20.0)
+    cutoff_end: float = Field(default=0.0, ge=0.0, le=20000.0)
 
 
 class RandomParams(BaseModel):
@@ -122,6 +126,40 @@ class PluckParams(BaseModel):
     seed: int | None = None
 
 
+class RiserParams(BaseModel):
+    """Parameters for riser/transition-FX synthesis."""
+
+    freq: float = Field(default=110.0, ge=20.0, le=2000.0)
+    octaves: float = Field(default=2.0, ge=0.0, le=6.0)
+    voices: int = Field(default=3, ge=1, le=8)
+    detune: float = Field(default=18.0, ge=0.0, le=100.0)
+    noise_mix: float = Field(default=0.5, ge=0.0, le=1.0)
+    curve: float = Field(default=2.0, ge=0.25, le=6.0)
+    direction: Literal["up", "down"] = "up"
+    seed: int | None = None
+
+
+class DrumParams(BaseModel):
+    """Parameters for drum one-shot synthesis."""
+
+    drum_type: Literal["kick", "snare", "hihat", "sub"] = "kick"
+    tune: float = Field(default=0.0, ge=-12.0, le=12.0)
+    decay: float = Field(default=0.5, ge=0.0, le=1.0)
+    tone: float = Field(default=0.5, ge=0.0, le=1.0)
+    seed: int | None = None
+
+
+class ModalParams(BaseModel):
+    """Parameters for modal struck-resonator synthesis."""
+
+    freq: float = Field(default=220.0, ge=20.0, le=4000.0)
+    material: Literal["bar", "bell", "bowl", "wood"] = "bell"
+    decay: float = Field(default=0.6, ge=0.0, le=1.0)
+    brightness: float = Field(default=0.75, ge=0.0, le=1.0)
+    interval: float = Field(default=0.0, ge=0.0, le=10.0)
+    seed: int | None = None
+
+
 class _RenderBase(BaseModel):
     duration: float = Field(ge=0.05, le=60.0)
     sample_rate: int = Field(default=44100, ge=8000, le=96000)
@@ -186,6 +224,27 @@ class PluckRender(_RenderBase):
     params: PluckParams = Field(default_factory=PluckParams)
 
 
+class RiserRender(_RenderBase):
+    """Render request for riser mode."""
+
+    mode: Literal["riser"]
+    params: RiserParams = Field(default_factory=RiserParams)
+
+
+class DrumRender(_RenderBase):
+    """Render request for drum mode."""
+
+    mode: Literal["drum"]
+    params: DrumParams = Field(default_factory=DrumParams)
+
+
+class ModalRender(_RenderBase):
+    """Render request for modal mode."""
+
+    mode: Literal["modal"]
+    params: ModalParams = Field(default_factory=ModalParams)
+
+
 RenderModel = (
     RandomRender
     | BytebeatRender
@@ -195,6 +254,9 @@ RenderModel = (
     | GrainCloudRender
     | CrackleRender
     | PluckRender
+    | RiserRender
+    | DrumRender
+    | ModalRender
 )
 RenderRequest = Annotated[RenderModel, Field(discriminator="mode")]
 
@@ -235,6 +297,18 @@ class PluckClip(PluckRender, _NamedMixin):
     """Save request for pluck mode."""
 
 
+class RiserClip(RiserRender, _NamedMixin):
+    """Save request for riser mode."""
+
+
+class DrumClip(DrumRender, _NamedMixin):
+    """Save request for drum mode."""
+
+
+class ModalClip(ModalRender, _NamedMixin):
+    """Save request for modal mode."""
+
+
 ClipSaveRequest = Annotated[
     RandomClip
     | BytebeatClip
@@ -243,7 +317,10 @@ ClipSaveRequest = Annotated[
     | SwarmClip
     | GrainCloudClip
     | CrackleClip
-    | PluckClip,
+    | PluckClip
+    | RiserClip
+    | DrumClip
+    | ModalClip,
     Field(discriminator="mode"),
 ]
 
@@ -345,6 +422,43 @@ def _synthesize(request: RenderModel) -> np.ndarray:
             seed=request.params.seed,
             stereo=request.stereo,
         )
+    elif isinstance(request, RiserRender):
+        samples = generate.generate_riser(
+            request.duration,
+            request.sample_rate,
+            freq=request.params.freq,
+            octaves=request.params.octaves,
+            voices=request.params.voices,
+            detune=request.params.detune,
+            noise_mix=request.params.noise_mix,
+            curve=request.params.curve,
+            direction=request.params.direction,
+            seed=request.params.seed,
+            stereo=request.stereo,
+        )
+    elif isinstance(request, DrumRender):
+        samples = generate.generate_drum(
+            request.duration,
+            request.sample_rate,
+            drum_type=request.params.drum_type,
+            tune=request.params.tune,
+            decay=request.params.decay,
+            tone=request.params.tone,
+            seed=request.params.seed,
+            stereo=request.stereo,
+        )
+    elif isinstance(request, ModalRender):
+        samples = generate.generate_modal(
+            request.duration,
+            request.sample_rate,
+            freq=request.params.freq,
+            material=request.params.material,
+            decay=request.params.decay,
+            brightness=request.params.brightness,
+            interval=request.params.interval,
+            seed=request.params.seed,
+            stereo=request.stereo,
+        )
     else:
         samples = generate.generate_pluck(
             request.duration,
@@ -362,6 +476,10 @@ def _synthesize(request: RenderModel) -> np.ndarray:
         fold=request.effects.fold,
         crush_bits=request.effects.crush_bits,
         crush_rate=request.effects.crush_rate,
+        filter_type=request.effects.filter_type,
+        cutoff=request.effects.cutoff,
+        resonance=request.effects.resonance,
+        cutoff_end=request.effects.cutoff_end,
     )
     return generate.apply_adsr(
         samples,

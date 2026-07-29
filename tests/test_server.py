@@ -39,6 +39,9 @@ def last_frames(wav_data: bytes, count: int) -> np.ndarray:
         "graincloud",
         "crackle",
         "pluck",
+        "riser",
+        "drum",
+        "modal",
     ],
 )
 def test_render_returns_valid_wav(client: TestClient, mode: str) -> None:
@@ -55,7 +58,9 @@ def test_render_returns_valid_wav(client: TestClient, mode: str) -> None:
         assert wav_file.getnframes() == int(0.25 * SAMPLE_RATE)
 
 
-@pytest.mark.parametrize("mode", ["fm", "swarm", "graincloud", "pluck"])
+@pytest.mark.parametrize(
+    "mode", ["fm", "swarm", "graincloud", "pluck", "riser", "modal"]
+)
 def test_render_stereo_wav(client: TestClient, mode: str) -> None:
     response = client.post(
         "/api/render",
@@ -113,7 +118,16 @@ def test_default_effects_block_is_identity(client: TestClient) -> None:
         "/api/render",
         json={
             **body,
-            "effects": {"drive": 0.0, "fold": 0.0, "crush_bits": 16, "crush_rate": 0.0},
+            "effects": {
+                "drive": 0.0,
+                "fold": 0.0,
+                "crush_bits": 16,
+                "crush_rate": 0.0,
+                "filter_type": "off",
+                "cutoff": 1000.0,
+                "resonance": 0.707,
+                "cutoff_end": 0.0,
+            },
         },
     )
     assert plain.status_code == 200
@@ -121,11 +135,27 @@ def test_default_effects_block_is_identity(client: TestClient) -> None:
     assert plain.content == explicit.content
 
 
+def test_modal_seeded_render_is_deterministic(client: TestClient) -> None:
+    body = {
+        "mode": "modal",
+        "duration": 0.25,
+        "sample_rate": SAMPLE_RATE,
+        "params": {"seed": 7},
+    }
+    first = client.post("/api/render", json=body)
+    second = client.post("/api/render", json=body)
+    reseeded = client.post("/api/render", json={**body, "params": {"seed": 8}})
+    assert first.status_code == 200
+    assert first.content == second.content
+    assert first.content != reseeded.content
+
+
 @pytest.mark.parametrize(
     "effects",
     [
         pytest.param({"crush_bits": 2}, id="bitcrush"),
         pytest.param({"drive": 0.8}, id="drive"),
+        pytest.param({"filter_type": "lowpass", "cutoff": 400.0}, id="filter"),
     ],
 )
 def test_effects_change_the_output(
@@ -164,6 +194,34 @@ def test_adsr_release_silences_tail(client: TestClient) -> None:
         ),
         pytest.param(
             {"mode": "bytebeat", "duration": 1.0, "params": {"a": 99}}, id="bad-shift"
+        ),
+        pytest.param(
+            {"mode": "drum", "duration": 1.0, "params": {"drum_type": "tom"}},
+            id="bad-drum-type",
+        ),
+        pytest.param(
+            {"mode": "modal", "duration": 1.0, "params": {"material": "steel"}},
+            id="bad-material",
+        ),
+        pytest.param(
+            {"mode": "riser", "duration": 1.0, "params": {"direction": "sideways"}},
+            id="bad-direction",
+        ),
+        pytest.param(
+            {"mode": "riser", "duration": 1.0, "params": {"voices": 0}},
+            id="bad-riser-voices",
+        ),
+        pytest.param(
+            {"mode": "fm", "duration": 1.0, "effects": {"filter_type": "notch"}},
+            id="bad-filter-type",
+        ),
+        pytest.param(
+            {"mode": "fm", "duration": 1.0, "effects": {"resonance": 100}},
+            id="bad-resonance",
+        ),
+        pytest.param(
+            {"mode": "fm", "duration": 1.0, "effects": {"cutoff": 1.0}},
+            id="bad-cutoff",
         ),
         pytest.param(
             {"mode": "harmonics", "duration": 1.0, "params": {"count": 0}},

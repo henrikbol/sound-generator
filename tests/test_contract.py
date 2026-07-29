@@ -32,6 +32,31 @@ GENERATORS = [
     ),
     pytest.param(lambda d, sr: generate.generate_crackle(d, sr, seed=1), id="crackle"),
     pytest.param(lambda d, sr: generate.generate_pluck(d, sr, seed=1), id="pluck"),
+    pytest.param(lambda d, sr: generate.generate_riser(d, sr, seed=1), id="riser"),
+    pytest.param(
+        lambda d, sr: generate.generate_drum(d, sr, drum_type="kick", seed=1),
+        id="drum-kick",
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_drum(d, sr, drum_type="snare", seed=1),
+        id="drum-snare",
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_drum(d, sr, drum_type="hihat", seed=1),
+        id="drum-hihat",
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_drum(d, sr, drum_type="sub", seed=1),
+        id="drum-sub",
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_modal(d, sr, material="bell", seed=1),
+        id="modal-bell",
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_modal(d, sr, material="wood", seed=1),
+        id="modal-wood",
+    ),
 ]
 
 STEREO_GENERATORS = [
@@ -61,6 +86,15 @@ STEREO_GENERATORS = [
     pytest.param(
         lambda d, sr: generate.generate_pluck(d, sr, seed=1, stereo=True), id="pluck"
     ),
+    pytest.param(
+        lambda d, sr: generate.generate_riser(d, sr, seed=1, stereo=True), id="riser"
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_drum(d, sr, seed=1, stereo=True), id="drum"
+    ),
+    pytest.param(
+        lambda d, sr: generate.generate_modal(d, sr, seed=1, stereo=True), id="modal"
+    ),
 ]
 
 SEEDED_TEXTURES = [
@@ -80,6 +114,17 @@ SEEDED_TEXTURES = [
     pytest.param(
         lambda s: generate.generate_harmonics(0.5, SAMPLE_RATE, drift=0.5, seed=s),
         id="harmonics-drift",
+    ),
+    pytest.param(
+        lambda s: generate.generate_riser(0.5, SAMPLE_RATE, seed=s), id="riser"
+    ),
+    # drum-hihat is deterministic (no RNG) — deliberately absent here.
+    pytest.param(
+        lambda s: generate.generate_drum(0.5, SAMPLE_RATE, drum_type="snare", seed=s),
+        id="drum-snare",
+    ),
+    pytest.param(
+        lambda s: generate.generate_modal(0.5, SAMPLE_RATE, seed=s), id="modal"
     ),
 ]
 

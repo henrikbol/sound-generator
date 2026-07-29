@@ -2,12 +2,22 @@
 
 import argparse
 
-from sound_generator.dsp import GRAIN_SOURCES, NOISE_COLORS, WAVEFORMS
+from sound_generator.dsp import (
+    DRUM_TYPES,
+    FILTER_TYPES,
+    GRAIN_SOURCES,
+    MODAL_MATERIALS,
+    NOISE_COLORS,
+    RISER_DIRECTIONS,
+    WAVEFORMS,
+)
 from sound_generator.effects import apply_adsr, apply_effects
+from sound_generator.percussion import generate_drum, generate_modal
 from sound_generator.textures import (
     generate_crackle,
     generate_graincloud,
     generate_pluck,
+    generate_riser,
     generate_swarm,
 )
 from sound_generator.tones import (
@@ -46,6 +56,9 @@ def main() -> None:
         "--crackle", action="store_true", help="Use crackle/dust impulses"
     )
     mode.add_argument("--pluck", action="store_true", help="Use Karplus-Strong plucks")
+    mode.add_argument("--riser", action="store_true", help="Use riser/transition FX")
+    mode.add_argument("--drum", action="store_true", help="Use drum one-shot")
+    mode.add_argument("--modal", action="store_true", help="Use modal struck resonator")
 
     parser.add_argument("--stereo", action="store_true", help="Render stereo output")
 
@@ -273,6 +286,121 @@ def main() -> None:
         help="Seconds between plucks; 0 = single pluck (default: 0.5)",
     )
 
+    # Riser parameters
+    parser.add_argument(
+        "--rs-freq",
+        type=float,
+        default=110.0,
+        metavar="HZ",
+        help="Riser start pitch in Hz (default: 110)",
+    )
+    parser.add_argument(
+        "--rs-octaves",
+        type=float,
+        default=2.0,
+        metavar="O",
+        help="Riser pitch-sweep span in octaves (default: 2.0)",
+    )
+    parser.add_argument(
+        "--rs-voices",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Riser detuned saw voices (default: 3)",
+    )
+    parser.add_argument(
+        "--rs-detune",
+        type=float,
+        default=18.0,
+        metavar="CENTS",
+        help="Riser detune spread in cents (default: 18)",
+    )
+    parser.add_argument(
+        "--rs-noise",
+        type=float,
+        default=0.5,
+        metavar="M",
+        help="Riser noise mix 0-1; 0 = pure tone, 1 = pure noise (default: 0.5)",
+    )
+    parser.add_argument(
+        "--rs-curve",
+        type=float,
+        default=2.0,
+        metavar="C",
+        help="Riser volume-ramp exponent; 1 = linear (default: 2.0)",
+    )
+    parser.add_argument(
+        "--rs-direction",
+        choices=RISER_DIRECTIONS,
+        default="up",
+        help="Riser direction: up = riser, down = downlifter (default: up)",
+    )
+
+    # Drum parameters
+    parser.add_argument(
+        "--dr-type",
+        choices=DRUM_TYPES,
+        default="kick",
+        help="Drum one-shot type (default: kick)",
+    )
+    parser.add_argument(
+        "--dr-tune",
+        type=float,
+        default=0.0,
+        metavar="SEMI",
+        help="Drum pitch offset in semitones (default: 0)",
+    )
+    parser.add_argument(
+        "--dr-decay",
+        type=float,
+        default=0.5,
+        metavar="D",
+        help="Drum tail length 0-1 (default: 0.5)",
+    )
+    parser.add_argument(
+        "--dr-tone",
+        type=float,
+        default=0.5,
+        metavar="T",
+        help="Drum brightness 0-1 (default: 0.5)",
+    )
+
+    # Modal parameters
+    parser.add_argument(
+        "--md-freq",
+        type=float,
+        default=220.0,
+        metavar="HZ",
+        help="Modal fundamental frequency in Hz (default: 220)",
+    )
+    parser.add_argument(
+        "--md-material",
+        choices=tuple(MODAL_MATERIALS),
+        default="bell",
+        help="Modal material preset (default: bell)",
+    )
+    parser.add_argument(
+        "--md-decay",
+        type=float,
+        default=0.6,
+        metavar="D",
+        help="Modal ring time 0-1 (default: 0.6)",
+    )
+    parser.add_argument(
+        "--md-brightness",
+        type=float,
+        default=0.75,
+        metavar="B",
+        help="Modal high-mode weighting 0-1 (default: 0.75)",
+    )
+    parser.add_argument(
+        "--md-interval",
+        type=float,
+        default=0.0,
+        metavar="S",
+        help="Seconds between strikes; 0 = single strike (default: 0)",
+    )
+
     # Effects chain (applies to any mode; defaults are a no-op)
     parser.add_argument(
         "--drive",
@@ -301,6 +429,33 @@ def main() -> None:
         default=0.0,
         metavar="HZ",
         help="Sample-hold rate in Hz; 0 = off (default: 0)",
+    )
+    parser.add_argument(
+        "--filter",
+        choices=FILTER_TYPES,
+        default="off",
+        help="Resonant filter type; off = bypass (default: off)",
+    )
+    parser.add_argument(
+        "--cutoff",
+        type=float,
+        default=1000.0,
+        metavar="HZ",
+        help="Filter cutoff in Hz (default: 1000)",
+    )
+    parser.add_argument(
+        "--resonance",
+        type=float,
+        default=0.707,
+        metavar="Q",
+        help="Filter resonance Q 0.5-20 (default: 0.707)",
+    )
+    parser.add_argument(
+        "--cutoff-end",
+        type=float,
+        default=0.0,
+        metavar="HZ",
+        help="Filter sweep target in Hz; 0 = static (default: 0)",
     )
 
     # ADSR envelope (applies to any mode; defaults are a no-op)
@@ -445,6 +600,60 @@ def main() -> None:
             seed=args.seed,
             stereo=args.stereo,
         )
+    elif args.riser:
+        print(
+            f"Generating {args.duration}s riser ({args.rs_direction} "
+            f"freq={args.rs_freq} Hz octaves={args.rs_octaves} "
+            f"voices={args.rs_voices} noise={args.rs_noise}) "
+            f"at {args.sample_rate} Hz..."
+        )
+        samples = generate_riser(
+            args.duration,
+            args.sample_rate,
+            freq=args.rs_freq,
+            octaves=args.rs_octaves,
+            voices=args.rs_voices,
+            detune=args.rs_detune,
+            noise_mix=args.rs_noise,
+            curve=args.rs_curve,
+            direction=args.rs_direction,
+            seed=args.seed,
+            stereo=args.stereo,
+        )
+    elif args.drum:
+        print(
+            f"Generating {args.duration}s {args.dr_type} drum "
+            f"(tune={args.dr_tune} decay={args.dr_decay} tone={args.dr_tone}) "
+            f"at {args.sample_rate} Hz..."
+        )
+        samples = generate_drum(
+            args.duration,
+            args.sample_rate,
+            drum_type=args.dr_type,
+            tune=args.dr_tune,
+            decay=args.dr_decay,
+            tone=args.dr_tone,
+            seed=args.seed,
+            stereo=args.stereo,
+        )
+    elif args.modal:
+        print(
+            f"Generating {args.duration}s modal {args.md_material} "
+            f"(freq={args.md_freq} Hz decay={args.md_decay} "
+            f"brightness={args.md_brightness} interval={args.md_interval}s) "
+            f"at {args.sample_rate} Hz..."
+        )
+        samples = generate_modal(
+            args.duration,
+            args.sample_rate,
+            freq=args.md_freq,
+            material=args.md_material,
+            decay=args.md_decay,
+            brightness=args.md_brightness,
+            interval=args.md_interval,
+            seed=args.seed,
+            stereo=args.stereo,
+        )
     else:
         print(
             f"Generating {args.duration}s of {args.noise_color} noise at {args.sample_rate} Hz..."
@@ -464,6 +673,10 @@ def main() -> None:
         fold=args.fold,
         crush_bits=args.crush_bits,
         crush_rate=args.crush_rate,
+        filter_type=args.filter,
+        cutoff=args.cutoff,
+        resonance=args.resonance,
+        cutoff_end=args.cutoff_end,
     )
     samples = apply_adsr(
         samples,

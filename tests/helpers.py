@@ -10,6 +10,12 @@ def spectrum(samples: np.ndarray, sample_rate: int) -> tuple[np.ndarray, np.ndar
     return freqs, mag
 
 
+def spectral_centroid(samples: np.ndarray, sample_rate: int) -> float:
+    """Return the magnitude-weighted mean frequency in Hz."""
+    freqs, mag = spectrum(samples, sample_rate)
+    return float(np.sum(freqs * mag) / np.sum(mag))
+
+
 def band_power_ratio(samples: np.ndarray, sample_rate: int) -> float:
     """Return mean per-bin power in 20–200 Hz over mean power in 2–20 kHz."""
     freqs, mag = spectrum(samples, sample_rate)

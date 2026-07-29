@@ -7,6 +7,50 @@ NoiseColor = str  # "white" | "pink" | "brown"
 NOISE_COLORS = ("white", "pink", "brown")
 WAVEFORMS = ("saw", "sine", "square", "triangle")
 GRAIN_SOURCES = ("sine", "noise")
+FILTER_TYPES = ("off", "lowpass", "bandpass", "highpass")
+DRUM_TYPES = ("kick", "snare", "hihat", "sub")
+RISER_DIRECTIONS = ("up", "down")
+
+# Per material: (freq_ratio, gain, decay_scale) per mode. Ratios are classic
+# modal series — free bar (transverse), Risset church bell, singing bowl,
+# woodblock. decay_scale shortens higher modes; MODAL_DECAY_MULT scales the
+# whole material's ring time.
+MODAL_MATERIALS: dict[str, tuple[tuple[float, float, float], ...]] = {
+    "bar": (
+        (1.0, 1.0, 1.0),
+        (2.756, 0.7, 0.55),
+        (5.404, 0.45, 0.35),
+        (8.933, 0.3, 0.25),
+        (13.345, 0.18, 0.18),
+        (18.645, 0.1, 0.12),
+    ),
+    "bell": (
+        (0.56, 0.8, 1.0),
+        (0.92, 1.0, 0.8),
+        (1.19, 0.75, 0.65),
+        (1.71, 0.6, 0.5),
+        (2.0, 0.55, 0.4),
+        (2.74, 0.4, 0.32),
+        (3.0, 0.35, 0.28),
+        (3.76, 0.25, 0.22),
+        (4.07, 0.2, 0.18),
+    ),
+    "bowl": (
+        (1.0, 1.0, 1.0),
+        (2.77, 0.55, 0.7),
+        (5.18, 0.3, 0.5),
+        (8.16, 0.18, 0.35),
+        (11.66, 0.1, 0.25),
+    ),
+    "wood": (
+        (1.0, 1.0, 1.0),
+        (2.55, 0.5, 0.5),
+        (4.62, 0.3, 0.3),
+        (6.98, 0.18, 0.2),
+    ),
+}
+
+MODAL_DECAY_MULT = {"bar": 0.8, "bell": 1.2, "bowl": 1.8, "wood": 0.15}
 
 
 def _pan_gains(pan: float) -> tuple[float, float]:

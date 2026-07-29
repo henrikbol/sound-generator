@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import sound_generator as generate
-from tests.helpers import spectrum
+from tests.helpers import band_power_ratio, spectral_centroid, spectrum
 
 SAMPLE_RATE = 8000
 
@@ -85,6 +85,82 @@ def test_effects_preserve_stereo_shape() -> None:
     )
     assert out.shape == samples.shape
     assert out.dtype == np.float32
+
+
+def test_filter_off_is_bitexact() -> None:
+    samples = generate.generate_fm(0.5, SAMPLE_RATE)
+    with_params = generate.apply_effects(
+        samples, SAMPLE_RATE, cutoff=500.0, resonance=8.0, cutoff_end=4000.0
+    )
+    assert np.array_equal(with_params, generate.apply_effects(samples, SAMPLE_RATE))
+
+
+def test_lowpass_kills_highs() -> None:
+    noise = generate.generate_random_audio(1.0, SAMPLE_RATE, seed=1)
+    plain = band_power_ratio(noise, SAMPLE_RATE)
+    filtered = generate.apply_effects(
+        noise, SAMPLE_RATE, filter_type="lowpass", cutoff=300.0
+    )
+    assert band_power_ratio(filtered, SAMPLE_RATE) > 10 * plain
+
+
+def test_highpass_kills_lows() -> None:
+    noise = generate.generate_random_audio(1.0, SAMPLE_RATE, seed=1)
+    plain = band_power_ratio(noise, SAMPLE_RATE)
+    filtered = generate.apply_effects(
+        noise, SAMPLE_RATE, filter_type="highpass", cutoff=2000.0
+    )
+    assert band_power_ratio(filtered, SAMPLE_RATE) < plain / 10
+
+
+def test_bandpass_concentrates_energy() -> None:
+    noise = generate.generate_random_audio(1.0, SAMPLE_RATE, seed=1)
+    filtered = generate.apply_effects(
+        noise, SAMPLE_RATE, filter_type="bandpass", cutoff=800.0, resonance=8.0
+    )
+    freqs, mag = spectrum(filtered, SAMPLE_RATE)
+    assert freqs[np.argmax(mag)] == pytest.approx(800.0, abs=200.0)
+
+
+def test_resonance_boosts_cutoff_region() -> None:
+    noise = generate.generate_random_audio(1.0, SAMPLE_RATE, seed=1)
+    flat = generate.apply_effects(
+        noise, SAMPLE_RATE, filter_type="lowpass", cutoff=1000.0, resonance=0.707
+    )
+    resonant = generate.apply_effects(
+        noise, SAMPLE_RATE, filter_type="lowpass", cutoff=1000.0, resonance=10.0
+    )
+    freqs, flat_mag = spectrum(flat, SAMPLE_RATE)
+    _, res_mag = spectrum(resonant, SAMPLE_RATE)
+    band = (freqs > 900) & (freqs < 1100)
+    assert res_mag[band].mean() / flat_mag[band].mean() >= 2.0
+
+
+def test_sweep_moves_spectral_centroid() -> None:
+    noise = generate.generate_random_audio(2.0, SAMPLE_RATE, seed=1)
+    swept = generate.apply_effects(
+        noise, SAMPLE_RATE, filter_type="lowpass", cutoff=200.0, cutoff_end=3000.0
+    )
+    quarter = len(swept) // 4
+    first = spectral_centroid(swept[:quarter], SAMPLE_RATE)
+    last = spectral_centroid(swept[-quarter:], SAMPLE_RATE)
+    assert last > 1.5 * first
+
+
+def test_filter_preserves_stereo_shape_and_peak() -> None:
+    samples = generate.generate_swarm(0.5, SAMPLE_RATE, seed=1, stereo=True)
+    out = generate.apply_effects(
+        samples, SAMPLE_RATE, filter_type="lowpass", cutoff=500.0, resonance=12.0
+    )
+    assert out.shape == samples.shape
+    assert out.dtype == np.float32
+    assert np.max(np.abs(out)) <= 1.0 + 1e-6
+
+
+def test_filter_rejects_unknown_type() -> None:
+    samples = generate.generate_fm(0.1, SAMPLE_RATE)
+    with pytest.raises(ValueError, match="filter type"):
+        generate.apply_effects(samples, SAMPLE_RATE, filter_type="notch")
 
 
 def test_adsr_broadcasts_over_stereo() -> None:
