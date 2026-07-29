@@ -1,4 +1,4 @@
-"""databend.py — Convert any binary file into audio.
+"""Convert any binary file into audio.
 
 Three modes:
   audify   Raw bytes interpreted directly as a PCM waveform (purest databending).
@@ -6,18 +6,10 @@ Three modes:
   granular Bytes control amplitude of noise grains → textural soundscapes.
 
 Usage:
-  uv run databend.py audify   myfile.exe  output.wav
-  uv run databend.py scale    myfile.png  output.wav --scale phrygian --bpm 120
-  uv run databend.py granular myfile.docx output.wav --grain-ms 30
-
-Requirements:
-  uv add numpy scipy
+  uv run databend audify   myfile.exe  output.wav
+  uv run databend scale    myfile.png  output.wav --scale phrygian --bpm 120
+  uv run databend granular myfile.docx output.wav --grain-ms 30
 """
-
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["numpy", "scipy"]
-# ///
 
 import argparse
 import sys
@@ -391,7 +383,3 @@ def main() -> None:
 
     write_wav(args.output, audio, sample_rate)
     print(f"{'─' * 50}\n")
-
-
-if __name__ == "__main__":
-    main()

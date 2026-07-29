@@ -2,13 +2,13 @@
 
 Two approaches to generating sound files from raw data in pure Python — no DAW, no plugins, just code and math.
 
-**Requires [uv](https://docs.astral.sh/uv/).** Every command below is run through `uv run`, which resolves Python (3.12+) and all dependencies automatically — no manual installs, no virtualenvs to manage. Install uv once and everything works.
+**Requires [uv](https://docs.astral.sh/uv/).** Every command below is run through `uv run`, which resolves Python (3.13+), installs all dependencies, and puts the project's `generate` and `databend` commands on the path automatically — no manual installs, no virtualenvs to manage. Install uv once and everything works.
 
 ---
 
 ## Web UI — quick start
 
-A local web frontend for `generate.py` — tweak parameters with sliders, pre-listen instantly, and collect clips for your DAW. The frontend is plain HTML/JS served by the backend — one command starts both, no build step:
+A local web frontend for the synthesis engine — tweak parameters with sliders, pre-listen instantly, and collect clips for your DAW. The frontend is plain HTML/JS served by the backend — one command starts both, no build step:
 
 ```bash
 # from the repo root
@@ -40,21 +40,21 @@ Saved clips land in `clips/` at the repo root (created on first save, gitignored
 
 ## Approaches
 
-| Approach | Script | Input | Character |
+| Approach | Command | Input | Character |
 |---|---|---|---|
-| [**Algorithmic generation**](#approach-1--algorithmic-generation-generatepy) | `generate.py` | Nothing — sound is synthesised from formulas | Bytebeat patterns, white noise |
-| [**Databending**](#approach-2--databending-databendpy) | `databend.py` | Any binary file (image, executable, document…) | Glitch music, soundscapes, melodic textures |
+| [**Algorithmic generation**](#approach-1--algorithmic-generation-generate) | `generate` | Nothing — sound is synthesised from formulas | Bytebeat patterns, white noise |
+| [**Databending**](#approach-2--databending-databend) | `databend` | Any binary file (image, executable, document…) | Glitch music, soundscapes, melodic textures |
 
 ---
 
-## Approach 1 — Algorithmic Generation (`generate.py`)
+## Approach 1 — Algorithmic Generation (`generate`)
 
 Sound is generated entirely from mathematical formulas operating on a sample counter. No input file needed.
 
 ### Usage
 
 ```bash
-uv run generate.py <duration> [options]
+uv run generate <duration> [options]
 ```
 
 ### Arguments
@@ -88,9 +88,9 @@ Random noise in three colors, selected with `--noise-color`. Pass `--seed` to ma
 | `brown` | 1/f² | Deep, rumbling — like distant surf |
 
 ```bash
-uv run generate.py 5
-uv run generate.py 5 --noise-color pink --output pink.wav
-uv run generate.py 5 --noise-color brown --seed 42
+uv run generate 5
+uv run generate 5 --noise-color pink --output pink.wav
+uv run generate 5 --noise-color brown --seed 42
 ```
 
 #### Bytebeat
@@ -98,8 +98,8 @@ uv run generate.py 5 --noise-color brown --seed 42
 Bytebeat is a technique where simple integer arithmetic on a sample counter `t` produces structured, lo-fi, algorithmically musical output. Classic bytebeat runs at an 8000 Hz tick rate — the script scales `t` automatically so pitch stays consistent regardless of `--sample-rate`.
 
 ```bash
-uv run generate.py 5 --bytebeat
-uv run generate.py 5 --bytebeat --output my_sound.wav
+uv run generate 5 --bytebeat
+uv run generate 5 --bytebeat --output my_sound.wav
 ```
 
 ##### Formula
@@ -123,13 +123,13 @@ where `t` is the 8000 Hz tick counter and `a`, `b`, `c`, `d` are tunable paramet
 
 ```bash
 # Rhythmic
-uv run generate.py 5 --bytebeat --bb-a 6 --bb-b 7 --bb-c 4 --bb-d 255
+uv run generate 5 --bytebeat --bb-a 6 --bb-b 7 --bb-c 4 --bb-d 255
 
 # Metallic
-uv run generate.py 5 --bytebeat --bb-a 10 --bb-b 2 --bb-c 6 --bb-d 64
+uv run generate 5 --bytebeat --bb-a 10 --bb-b 2 --bb-c 6 --bb-d 64
 
 # Lo-fi melody
-uv run generate.py 5 --bytebeat --bb-a 8 --bb-b 11 --bb-c 2 --bb-d 192
+uv run generate 5 --bytebeat --bb-a 8 --bb-b 11 --bb-c 2 --bb-d 192
 ```
 
 #### FM synthesis
@@ -137,8 +137,8 @@ uv run generate.py 5 --bytebeat --bb-a 8 --bb-b 11 --bb-c 2 --bb-d 192
 A carrier sine wave is phase-modulated by a second oscillator running at `carrier × ratio` Hz. Integer ratios produce harmonic, bell-like tones; non-integer ratios produce inharmonic, metallic ones. The modulation index controls brightness — `0` is a pure sine, higher values add ever more sidebands.
 
 ```bash
-uv run generate.py 5 --fm
-uv run generate.py 5 --fm --fm-freq 110 --fm-ratio 1.5 --fm-index 3
+uv run generate 5 --fm
+uv run generate 5 --fm --fm-freq 110 --fm-ratio 1.5 --fm-index 3
 ```
 
 ##### FM Parameters
@@ -153,13 +153,13 @@ uv run generate.py 5 --fm --fm-freq 110 --fm-ratio 1.5 --fm-index 3
 
 ```bash
 # Bell — inharmonic ratio + decaying envelope
-uv run generate.py 3 --fm --fm-freq 440 --fm-ratio 3.5 --fm-index 8 --attack 0.005 --decay 2.5 --sustain 0
+uv run generate 3 --fm --fm-freq 440 --fm-ratio 3.5 --fm-index 8 --attack 0.005 --decay 2.5 --sustain 0
 
 # Metallic drone
-uv run generate.py 5 --fm --fm-freq 110 --fm-ratio 2.37 --fm-index 12
+uv run generate 5 --fm --fm-freq 110 --fm-ratio 2.37 --fm-index 12
 
 # Soft FM bass
-uv run generate.py 5 --fm --fm-freq 55 --fm-ratio 1 --fm-index 2
+uv run generate 5 --fm --fm-freq 55 --fm-ratio 1 --fm-index 2
 ```
 
 #### Layered harmonics
@@ -167,8 +167,8 @@ uv run generate.py 5 --fm --fm-freq 55 --fm-ratio 1 --fm-index 2
 Stacks sine waves at integer multiples of a base frequency with amplitudes falling off as `1/n^decay`, normalised so the sum never clips. Partials above the Nyquist frequency are skipped automatically. `--harm-decay 1.0` matches a sawtooth's rolloff; higher values sound darker and rounder.
 
 ```bash
-uv run generate.py 5 --harmonics
-uv run generate.py 5 --harmonics --harm-freq 220 --harm-count 12
+uv run generate 5 --harmonics
+uv run generate 5 --harmonics --harm-freq 220 --harm-count 12
 ```
 
 ##### Harmonics Parameters
@@ -186,16 +186,16 @@ uv run generate.py 5 --harmonics --harm-freq 220 --harm-count 12
 
 ```bash
 # Organ-ish — slow rolloff, medium stack
-uv run generate.py 5 --harmonics --harm-freq 110 --harm-count 6 --harm-decay 0.5
+uv run generate 5 --harmonics --harm-freq 110 --harm-count 6 --harm-decay 0.5
 
 # Saw-like buzz — many harmonics, 1/n rolloff
-uv run generate.py 5 --harmonics --harm-freq 82.4 --harm-count 16 --harm-decay 1.0
+uv run generate 5 --harmonics --harm-freq 82.4 --harm-count 16 --harm-decay 1.0
 
 # Dark hum — steep rolloff
-uv run generate.py 5 --harmonics --harm-freq 55 --harm-count 8 --harm-decay 2.0
+uv run generate 5 --harmonics --harm-freq 55 --harm-count 8 --harm-decay 2.0
 
 # Evolving spectral drone — inharmonic partials, slow shimmer (great for granulation)
-uv run generate.py 20 --harmonics --harm-freq 82.4 --harm-count 16 --harm-stretch 0.008 --harm-drift 0.7 --stereo --seed 42
+uv run generate 20 --harmonics --harm-freq 82.4 --harm-count 16 --harm-stretch 0.008 --harm-drift 0.7 --stereo --seed 42
 ```
 
 ### Texture Generators
@@ -216,10 +216,10 @@ Many detuned copies of a basic waveform, spread across the stereo field, with a 
 
 ```bash
 # Classic supersaw pad
-uv run generate.py 15 --swarm --swarm-voices 9 --swarm-detune 30 --stereo
+uv run generate 15 --swarm --swarm-voices 9 --swarm-detune 30 --stereo
 
 # Deep sine drone, slow drift
-uv run generate.py 30 --swarm --swarm-freq 55 --swarm-wave sine --swarm-voices 5 --swarm-drift 0.6 --stereo
+uv run generate 30 --swarm --swarm-freq 55 --swarm-wave sine --swarm-voices 5 --swarm-drift 0.6 --stereo
 ```
 
 #### Grain cloud
@@ -236,10 +236,10 @@ Stochastic micro-grains (Hanning-windowed sine bursts, or noise) scattered in ti
 
 ```bash
 # Shimmering tonal cloud
-uv run generate.py 20 --graincloud --gc-pitch 880 --gc-spread 7 --gc-density 60 --stereo
+uv run generate 20 --graincloud --gc-pitch 880 --gc-spread 7 --gc-density 60 --stereo
 
 # Airy noise wash
-uv run generate.py 15 --graincloud --gc-source noise --gc-grain-ms 120 --gc-density 80 --stereo
+uv run generate 15 --graincloud --gc-source noise --gc-grain-ms 120 --gc-density 80 --stereo
 ```
 
 #### Crackle / dust
@@ -254,10 +254,10 @@ Sparse random impulses with short resonant tails — squared-uniform amplitudes 
 
 ```bash
 # Vinyl surface noise
-uv run generate.py 20 --crackle --ck-density 12 --ck-tone 1800 --stereo
+uv run generate 20 --crackle --ck-density 12 --ck-tone 1800 --stereo
 
 # Dense metallic dust
-uv run generate.py 10 --crackle --ck-density 300 --ck-tone 5000 --ck-decay-ms 15 --stereo
+uv run generate 10 --crackle --ck-density 300 --ck-tone 5000 --ck-decay-ms 15 --stereo
 ```
 
 #### Karplus-Strong plucks
@@ -272,10 +272,10 @@ Physically-modelled plucked strings (two delay lines, re-excited on a clock). Or
 
 ```bash
 # Slow meditative plucks
-uv run generate.py 20 --pluck --pk-freq 110 --pk-decay 0.9 --pk-interval 1.5 --stereo
+uv run generate 20 --pluck --pk-freq 110 --pk-decay 0.9 --pk-interval 1.5 --stereo
 
 # Fast koto-like strum
-uv run generate.py 10 --pluck --pk-freq 440 --pk-decay 0.4 --pk-interval 0.12 --stereo
+uv run generate 10 --pluck --pk-freq 440 --pk-decay 0.4 --pk-interval 0.12 --stereo
 ```
 
 ### ADSR Envelope
@@ -291,10 +291,10 @@ An attack/decay/sustain/release amplitude envelope can be applied on top of **an
 
 ```bash
 # Percussive pluck out of a harmonics stack
-uv run generate.py 2 --harmonics --attack 0.005 --decay 0.4 --sustain 0.2 --release 1.0
+uv run generate 2 --harmonics --attack 0.005 --decay 0.4 --sustain 0.2 --release 1.0
 
 # Slow noise swell
-uv run generate.py 6 --noise-color pink --attack 3 --release 3
+uv run generate 6 --noise-color pink --attack 3 --release 3
 ```
 
 ### Effects Chain
@@ -310,10 +310,10 @@ A distortion chain applied to **any** mode, before the ADSR envelope (so fades s
 
 ```bash
 # Folded FM — bell tone into buzzing metal
-uv run generate.py 5 --fm --fm-ratio 3.5 --fold 2.5
+uv run generate 5 --fm --fm-ratio 3.5 --fold 2.5
 
 # Saturated swarm with lo-fi crush
-uv run generate.py 10 --swarm --drive 0.5 --crush-bits 8 --crush-rate 11025 --stereo
+uv run generate 10 --swarm --drive 0.5 --crush-bits 8 --crush-rate 11025 --stereo
 ```
 
 ### Stereo
@@ -322,7 +322,7 @@ uv run generate.py 10 --swarm --drive 0.5 --crush-bits 8 --crush-rate 11025 --st
 
 ---
 
-## Approach 2 — Databending (`databend.py`)
+## Approach 2 — Databending (`databend`)
 
 > Convert any binary file into audio — glitch music, soundscapes, and melodic textures from raw data.
 
@@ -354,15 +354,10 @@ Databending is firmly rooted in **glitch music**. Pioneering practitioners inclu
 
 ### Requirements
 
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.12+.
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.13+. Dependencies come from the project, so there is nothing to install:
 
 ```bash
-# Uses uv with inline script dependencies — no manual install needed
-uv run databend.py --help
-
-# Or add dependencies explicitly:
-uv add numpy scipy
-uv run databend.py --help
+uv run databend --help
 ```
 
 ### Modes
@@ -377,13 +372,13 @@ The purest databending technique. Raw bytes are interpreted directly as little-e
 
 ```bash
 # Default — full fidelity
-uv run databend.py audify myimage.png output.wav
+uv run databend audify myimage.png output.wav
 
 # Half sample rate — one octave lower, twice as long
-uv run databend.py audify myfile.exe output.wav --sample-rate 22050
+uv run databend audify myfile.exe output.wav --sample-rate 22050
 
 # Limit to first 8 KB — useful for huge files
-uv run databend.py audify mybinary output.wav --max-bytes 8192
+uv run databend audify mybinary output.wav --max-bytes 8192
 ```
 
 **Best source files:** Uncompressed images (BMP, TIFF) have dense, structured byte patterns and tend to sound rich. Executables (`.exe`, `.so`, `.dylib`) produce complex electronic textures. Avoid compressed files (ZIP, MP3) — the entropy is too uniform.
@@ -407,16 +402,16 @@ Each byte value (0–255) is mapped to a pitch in a musical scale across 5 octav
 
 ```bash
 # Phrygian mode at 140 BPM, 16th notes (default)
-uv run databend.py scale myfile.docx output.wav --scale phrygian --bpm 140
+uv run databend scale myfile.docx output.wav --scale phrygian --bpm 140
 
 # Blues at 90 BPM, 32nd notes — very fast melodic runs
-uv run databend.py scale myimage.png output.wav --scale blues --bpm 90 --divisions 8
+uv run databend scale myimage.png output.wav --scale blues --bpm 90 --divisions 8
 
 # Slow, quarter-note pentatonic — spacious and meditative
-uv run databend.py scale mybinary output.wav --scale pentatonic --bpm 60 --divisions 1
+uv run databend scale mybinary output.wav --scale pentatonic --bpm 60 --divisions 1
 
 # Limit to 256 bytes — produces a concise 256-note phrase
-uv run databend.py scale myfile.png output.wav --max-bytes 256
+uv run databend scale myfile.png output.wav --max-bytes 256
 ```
 
 > **Note:** Scale mode default `--max-bytes 512` keeps output to a manageable length. A 10 KB file at 120 BPM, 16th notes would produce ~85 seconds of audio.
@@ -431,19 +426,19 @@ Bytes are grouped into grains. Each grain's byte values modulate the amplitude o
 
 ```bash
 # Default — 20 ms grains, 2× overlap
-uv run databend.py granular myfile.docx output.wav
+uv run databend granular myfile.docx output.wav
 
 # Long grains, high density — ambient drone/pad
-uv run databend.py granular myfile.png output.wav --grain-ms 80 --density 4
+uv run databend granular myfile.png output.wav --grain-ms 80 --density 4
 
 # Short grains, low density — percussive, chattery texture
-uv run databend.py granular myfile.exe output.wav --grain-ms 8 --density 1.2
+uv run databend granular myfile.exe output.wav --grain-ms 8 --density 1.2
 ```
 
 ### All options
 
 ```
-usage: databend.py {audify,scale,granular} input output [options]
+usage: databend {audify,scale,granular} input output [options]
 
 AUDIFY:
   --sample-rate INT    Sample rate in Hz (default 44100)

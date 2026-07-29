@@ -2,7 +2,6 @@
 
 import re
 import subprocess
-import sys
 import wave
 from io import BytesIO
 from pathlib import Path
@@ -15,12 +14,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import sound_generator as generate
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-import generate
-
 CLIPS_DIR = _REPO_ROOT / "clips"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
