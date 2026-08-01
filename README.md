@@ -584,9 +584,9 @@ The output WAVs are standard 16-bit / 44.1 kHz and drop straight into Ableton.
 
 ### Further reading
 
-- **stAllio!'s Databending Primer** — the definitive guide to sonification technique: `blog.animalswithinanimals.com`
-- **CDM article on Binary Synth** — browser-based binary-to-MIDI tool: `cdm.link/transform-any-binary-file-into-sound`
-- **Wikipedia: Databending** — history and context
-- **Wikipedia: Data Sonification** — the broader scientific and artistic field
-- **Audacity Import Raw Data** — `File → Import → Raw Data` lets you audify any file without writing code; a good way to preview what a file sounds like before processing it
+- [**stAllio!'s Databending Primer**](http://blog.animalswithinanimals.com/2008/09/databending-and-glitch-art-primer-part.html) — the definitive guide to sonification technique (part 2 of the databending and glitch art primer)
+- [**CDM article on Binary Synth**](https://cdm.link/transform-any-binary-file-into-sound/) — browser-based binary-to-MIDI tool
+- [**Wikipedia: Databending**](https://en.wikipedia.org/wiki/Databending) — history and context
+- [**Wikipedia: Data sonification**](https://en.wikipedia.org/wiki/Data_sonification) — the broader scientific and artistic field
+- [**Audacity Import Raw Data**](https://manual.audacityteam.org/man/file_menu_import.html) — `File → Import → Raw Data` lets you audify any file without writing code; a good way to preview what a file sounds like before processing it
 
