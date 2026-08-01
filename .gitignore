@@ -21,3 +21,6 @@ clips/
 *.png
 *.bmp
 *.gif
+
+# README assets are tracked despite the image ignores above
+!docs/screenshot.png
