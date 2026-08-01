@@ -8,7 +8,8 @@
 /* ------------------------------ State --------------------------------- */
 
 // Modes whose params take a seed — fm/bytebeat are deterministic and never get one.
-const STOCHASTIC_MODES = ["random", "harmonics", "swarm", "graincloud", "crackle", "pluck", "riser", "drum", "modal"];
+// databend always sends one; the server threads it into granular only.
+const STOCHASTIC_MODES = ["random", "harmonics", "swarm", "graincloud", "crackle", "pluck", "riser", "drum", "modal", "databend"];
 
 function rollSeed() {
   return 1 + Math.floor(Math.random() * 0x7fffffff);
@@ -33,6 +34,8 @@ const state = {
     riser: { freq: 110.0, octaves: 2.0, voices: 3, detune: 18, noise_mix: 0.5, curve: 2.0, direction: "up" },
     drum: { drum_type: "kick", tune: 0, decay: 0.5, tone: 0.5 },
     modal: { freq: 220.0, material: "bell", decay: 0.6, brightness: 0.75, interval: 0 },
+    databend: { bend: "granular", source: "demo", sample_rate: 44100, scale: "pentatonic",
+                bpm: 120, divisions: 4, grain_ms: 20, density: 2.0 },
   },
   pinnedSeed: null, // global seed input; null = unpinned
   rolledSeed: rollSeed(), // rerolled only by Generate / the dice button
@@ -56,6 +59,11 @@ let debounceTimer = 0;
 let nameEdited = false; // user typed a custom clip name — stop auto-suggesting
 let clipAudio = null; // Audio element for previewing library clips
 let clipAudioFile = null; // filename currently loaded into clipAudio
+
+// Databend source display state — NOT in state.params (that object is
+// spread verbatim into the request body).
+let bendSource = { label: "Water Lilies (demo)", filename: "", isDemo: true };
+let bendPreviewUrl = null; // object URL of the current upload preview, if any
 
 /* -------------------------- Parameter specs --------------------------- */
 
@@ -217,6 +225,31 @@ const PARAM_DEFS = [
   { mount: "modal", key: "interval", label: "interval s", min: 0, max: 10, step: 0.05,
     hint: "Strike clock — 0 = single hit.",
     get: () => state.params.modal.interval, set: (v) => (state.params.modal.interval = v) },
+  // Databend — audify
+  { mount: "databend-audify", key: "sample_rate", label: "rate Hz", min: 8000, max: 96000, step: 1000,
+    hint: "Playback rate for the raw bytes — lower: slower + darker, higher: faster + brighter. Sets the clip's sample rate.",
+    get: () => state.params.databend.sample_rate, set: (v) => (state.params.databend.sample_rate = v) },
+  // Databend — scale
+  { mount: "databend-scale", key: "scale", label: "scale", type: "select",
+    options: ["chromatic", "major", "minor", "pentatonic", "phrygian", "lydian", "blues", "wholetone"],
+    hint: "Musical scale the byte values are quantised into (5 octaves from C2).",
+    get: () => state.params.databend.scale, set: (v) => (state.params.databend.scale = v) },
+  { mount: "databend-scale", key: "bpm", label: "bpm", min: 30, max: 300, step: 1,
+    hint: "Tempo of the byte melody.",
+    get: () => state.params.databend.bpm, set: (v) => (state.params.databend.bpm = v) },
+  { mount: "databend-scale", key: "divisions", label: "grid", type: "select",
+    options: [ { value: "1", label: "quarter" }, { value: "2", label: "8th" },
+               { value: "4", label: "16th" }, { value: "8", label: "32nd" } ],
+    hint: "Note length as divisions of a beat.",
+    get: () => String(state.params.databend.divisions),
+    set: (v) => (state.params.databend.divisions = Number(v)) },
+  // Databend — granular
+  { mount: "databend-granular", key: "grain_ms", label: "grain ms", min: 5, max: 200, step: 1,
+    hint: "Grain duration. Short: granular buzz — long: smoother texture.",
+    get: () => state.params.databend.grain_ms, set: (v) => (state.params.databend.grain_ms = v) },
+  { mount: "databend-granular", key: "density", label: "density", min: 0.5, max: 8, step: 0.1,
+    hint: "Grain overlap factor. Higher: denser wash (and more bytes per second). Grain noise follows the seed.",
+    get: () => state.params.databend.density, set: (v) => (state.params.databend.density = v) },
   // Global
   { mount: "global", key: "duration", label: "duration s", min: 0.05, max: 30, step: 0.05,
     hint: "Clip length in seconds.",
@@ -277,6 +310,16 @@ function fmtBytes(n) {
   return `${n} B`;
 }
 
+// Prefer the FastAPI error detail (e.g. "Unknown or expired source…") over
+// a bare status code when surfacing API failures in a toast.
+async function apiErrorMessage(res, fallback) {
+  try {
+    return (await res.json()).detail || `${fallback} (${res.status})`;
+  } catch {
+    return `${fallback} (${res.status})`;
+  }
+}
+
 let toastTimer = 0;
 function toast(msg, isError = true) {
   const el = $("#toast");
@@ -307,6 +350,17 @@ function effectiveSeed() {
 function renderBody() {
   const params = { ...state.params[state.mode] };
   if (STOCHASTIC_MODES.includes(state.mode)) params.seed = effectiveSeed();
+  if (state.mode === "databend") {
+    // No top-level sample_rate/stereo — databend is mono and audify's rate
+    // lives in params.sample_rate (scale/granular are fixed at 44100).
+    return {
+      mode: "databend",
+      duration: state.duration,
+      params,
+      adsr: { ...state.adsr },
+      effects: { ...state.effects },
+    };
+  }
   return {
     mode: state.mode,
     duration: state.duration,
@@ -355,8 +409,19 @@ function suggestName() {
     case "modal":
       name = `modal-${p.modal.material}-${fmtNum(p.modal.freq)}`;
       break;
+    case "databend": {
+      const d = p.databend;
+      const src = bendSource.isDemo
+        ? "monet"
+        : bendSource.filename.toLowerCase().replace(/\.[^.]*$/, "")
+            .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 16) || "file";
+      name = `bend-${d.bend}-${src}`;
+      if (d.bend === "granular") name += `-s${effectiveSeed()}`;
+      else if (d.bend === "scale") name += `-${d.scale}`;
+      break;
+    }
   }
-  return state.stereo ? `${name}-st` : name;
+  return state.stereo && state.mode !== "databend" ? `${name}-st` : name;
 }
 
 function refreshSuggestedName() {
@@ -497,6 +562,9 @@ const LOG_RANDOM_KEYS = new Set(["carrier", "freq", "pitch", "tone"]);
 // Full-range uniforms are almost always harsh for these — use tamed draws.
 const RANDOM_OVERRIDES = {
   "pluck.interval": () => randomBetween(0.05, 2, 0.05),
+  // audify's rate is pitch-like — draw it log-uniform (it is not in
+  // LOG_RANDOM_KEYS, which matches by bare key).
+  "databend-audify.sample_rate": () => logRandomBetween(8000, 96000, 1000),
   // drum.tone is a 0-1 amount — without this it would hit the "tone"
   // log-random key meant for crackle's tone-in-Hz.
   "drum.tone": () => randomBetween(0, 1, 0.01),
@@ -525,8 +593,20 @@ function logRandomBetween(min, max, step) {
 }
 
 function randomizePatch() {
+  // The databend pane's bend select is hand-written, not a PARAM_DEFS entry.
+  // Roll it before the loop so the new bend's sub-mount is the one randomized.
+  if (state.mode === "databend") {
+    const bends = ["audify", "scale", "granular"];
+    state.params.databend.bend = bends[Math.floor(Math.random() * bends.length)];
+    $("#bend-mode").value = state.params.databend.bend;
+    updateBendMounts();
+  }
   for (const def of PARAM_DEFS) {
-    if (def.mount !== state.mode && def.mount !== "effects") continue;
+    // Databend params live in per-bend sub-mounts; only the active bend's
+    // mount randomizes. source has no def, so it can't be touched.
+    const active = def.mount === state.mode || def.mount === "effects" ||
+      (state.mode === "databend" && def.mount === `databend-${state.params.databend.bend}`);
+    if (!active) continue;
     const override = RANDOM_OVERRIDES[`${def.mount}.${def.key}`];
     if (override) {
       def.set(override());
@@ -554,6 +634,18 @@ function randomizePatch() {
 
 /* ----------------------------- Tabs ----------------------------------- */
 
+// Databend output is always mono at its own rate — lock the global
+// sample-rate select and stereo toggle while that tab is active.
+function updateGlobalControlLocks() {
+  const bend = state.mode === "databend";
+  $("#sample-rate").disabled = bend;
+  $("#btn-stereo").disabled = bend;
+  $("#sample-rate").title = bend
+    ? "Databend sets its own rate (audify rate param; scale/granular are 44100 Hz)"
+    : "";
+  $("#btn-stereo").title = bend ? "Databend output is mono" : "Render a 2-channel stereo file";
+}
+
 function setMode(mode) {
   state.mode = mode;
   document.querySelectorAll(".tab").forEach((t) => {
@@ -564,7 +656,56 @@ function setMode(mode) {
   document.querySelectorAll(".pane").forEach((p) => {
     p.classList.toggle("active", p.dataset.mode === mode);
   });
+  updateGlobalControlLocks();
   onParamChange();
+}
+
+/* ------------------------ Databend source ------------------------------ */
+
+function updateBendMounts() {
+  document.querySelectorAll('[data-mount^="databend-"]').forEach((el) => {
+    el.hidden = el.dataset.mount !== `databend-${state.params.databend.bend}`;
+  });
+}
+
+function setBendSource(source, label, isDemo, previewUrl, filename = "") {
+  state.params.databend.source = source;
+  bendSource = { label, filename, isDemo };
+  if (bendPreviewUrl && bendPreviewUrl !== previewUrl) URL.revokeObjectURL(bendPreviewUrl);
+  bendPreviewUrl = isDemo ? null : previewUrl;
+  $("#bend-source-name").textContent = label;
+  $("#btn-bend-demo").hidden = isDemo;
+  $("#bend-caption").hidden = !isDemo;
+  const img = $("#bend-image");
+  if (isDemo) {
+    img.src = "/static/databend-demo.jpg";
+    img.hidden = false;
+  } else if (previewUrl) {
+    img.src = previewUrl;
+    img.hidden = false;
+  } else {
+    img.hidden = true;
+  }
+  onParamChange();
+}
+
+async function uploadBendFile(file) {
+  if (file.size > 16 * 1024 * 1024) {
+    toast("File too large (max 16 MB)");
+    return;
+  }
+  try {
+    const res = await fetch(`/api/databend/upload?filename=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      body: file,
+    });
+    if (!res.ok) throw new Error(await apiErrorMessage(res, "upload failed"));
+    const info = await res.json();
+    const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    setBendSource(info.source, `${info.filename} · ${fmtBytes(info.size_bytes)}`, false, preview, info.filename);
+  } catch (err) {
+    toast(err instanceof TypeError ? "Backend not reachable" : err.message);
+  }
 }
 
 /* -------------------------- Param changes ----------------------------- */
@@ -592,7 +733,7 @@ async function doRender() {
       body: JSON.stringify(renderBody()),
       signal: abort.signal,
     });
-    if (!res.ok) throw new Error(`render failed (${res.status})`);
+    if (!res.ok) throw new Error(await apiErrorMessage(res, "render failed"));
     const bytes = await res.arrayBuffer();
     const buffer = await ensureAudioCtx().decodeAudioData(bytes);
     if (seq !== renderSeq) return; // a newer render superseded this one
@@ -849,7 +990,7 @@ async function saveClip() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...renderBody(), name }),
     });
-    if (!res.ok) throw new Error(`save failed (${res.status})`);
+    if (!res.ok) throw new Error(await apiErrorMessage(res, "save failed"));
     const saved = await res.json();
     toast(`Saved ${saved.filename}`, false);
     nameEdited = false;
@@ -900,6 +1041,33 @@ function wire() {
     state.params.random.color = e.target.value;
     $("#noise-color-hint").textContent = NOISE_HINTS[e.target.value];
     onParamChange();
+  });
+  // Databend controls (hand-written, like the noise color select)
+  $("#bend-mode").addEventListener("change", (e) => {
+    state.params.databend.bend = e.target.value;
+    updateBendMounts();
+    onParamChange();
+  });
+  $("#btn-bend-file").addEventListener("click", () => $("#bend-file").click());
+  $("#bend-file").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) uploadBendFile(file);
+    e.target.value = ""; // so re-picking the same file fires change again
+  });
+  $("#btn-bend-demo").addEventListener("click", () => {
+    setBendSource("demo", "Water Lilies (demo)", true, null);
+  });
+  const dropZone = $("#bend-source");
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.classList.add("dragover");
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("dragover");
+    const file = e.dataTransfer.files[0];
+    if (file) uploadBendFile(file);
   });
   // Sample rate
   $("#sample-rate").addEventListener("change", (e) => {
@@ -977,6 +1145,7 @@ function wire() {
 
   // Initial UI state
   $("#btn-auto").classList.add("active");
+  updateBendMounts();
   setModeInitial();
   sizeCanvas();
   refreshSeedUI();
@@ -994,6 +1163,7 @@ function setModeInitial() {
   document.querySelectorAll(".pane").forEach((p) => {
     p.classList.toggle("active", p.dataset.mode === state.mode);
   });
+  updateGlobalControlLocks();
 }
 
 document.addEventListener("DOMContentLoaded", wire);

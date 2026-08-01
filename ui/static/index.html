@@ -11,7 +11,7 @@
 <body>
   <header class="topbar">
     <h1>Sound&nbsp;Generator</h1>
-    <span class="topbar-sub">noise · bytebeat · fm · harmonics · swarm · cloud · crackle · pluck · riser · drums · modal</span>
+    <span class="topbar-sub">noise · bytebeat · fm · harmonics · swarm · cloud · crackle · pluck · riser · drums · modal · databend</span>
   </header>
 
   <main class="layout">
@@ -30,6 +30,7 @@
         <button class="tab" role="tab" data-mode="riser">Riser</button>
         <button class="tab" role="tab" data-mode="drum">Drums</button>
         <button class="tab" role="tab" data-mode="modal">Modal</button>
+        <button class="tab" role="tab" data-mode="databend">Databend</button>
       </div>
 
       <!-- Noise -->
@@ -76,6 +77,35 @@
       </div>
       <div class="pane" data-mode="modal">
         <div class="param-mount" data-mount="modal"></div>
+      </div>
+
+      <!-- Databend -->
+      <div class="pane" data-mode="databend">
+        <div class="field">
+          <label>Source</label>
+          <div class="bend-source" id="bend-source">
+            <img id="bend-image" src="/static/databend-demo.jpg" alt="Databend source preview">
+            <p class="bend-caption" id="bend-caption">Claude Monet, <em>Water Lilies</em> (1906),
+               Art Institute of Chicago — public domain</p>
+            <div class="bend-source-row">
+              <span class="bend-source-name" id="bend-source-name">Water Lilies (demo)</span>
+              <button id="btn-bend-file" class="btn btn-small">Choose file…</button>
+              <button id="btn-bend-demo" class="btn btn-small" hidden>Use demo</button>
+              <input type="file" id="bend-file" hidden aria-label="Databend source file">
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="bend-mode">Bend</label>
+          <select id="bend-mode">
+            <option value="audify">audify — raw bytes as PCM (harsh, glitchy)</option>
+            <option value="scale">scale — bytes as melody notes</option>
+            <option value="granular" selected>granular — bytes as grain texture</option>
+          </select>
+        </div>
+        <div class="param-mount" data-mount="databend-audify" hidden></div>
+        <div class="param-mount" data-mount="databend-scale" hidden></div>
+        <div class="param-mount" data-mount="databend-granular"></div>
       </div>
 
       <!-- Global -->

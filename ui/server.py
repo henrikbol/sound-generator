@@ -1,24 +1,33 @@
 """FastAPI backend for the local sound-generator web UI."""
 
 import re
+import secrets
 import subprocess
 import wave
+from collections import OrderedDict
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import sound_generator as generate
+from sound_generator import databend
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 CLIPS_DIR = _REPO_ROOT / "clips"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# Databend upload state — module globals read at call time so tests can monkeypatch.
+MAX_UPLOAD_BYTES = 16 * 1024 * 1024
+MAX_UPLOADS = 8
+DATABEND_UPLOADS: OrderedDict[str, tuple[str, bytes]] = OrderedDict()
+DEMO_IMAGE_PATH = STATIC_DIR / "databend-demo.jpg"
 
 _FILENAME_RE = re.compile(r"^[a-z0-9-]+\.wav$")
 
@@ -160,6 +169,29 @@ class ModalParams(BaseModel):
     seed: int | None = None
 
 
+class DatabendParams(BaseModel):
+    """Parameters for databend (binary-file sonification)."""
+
+    bend: Literal["audify", "scale", "granular"] = "granular"
+    source: str = Field(default="demo", pattern=r"^(demo|[0-9a-f]{16})$")
+    sample_rate: int = Field(default=44100, ge=8000, le=96000)  # audify playback rate
+    scale: Literal[
+        "chromatic",
+        "major",
+        "minor",
+        "pentatonic",
+        "phrygian",
+        "lydian",
+        "blues",
+        "wholetone",
+    ] = "pentatonic"
+    bpm: float = Field(default=120.0, ge=30.0, le=300.0)
+    divisions: Literal[1, 2, 4, 8] = 4
+    grain_ms: float = Field(default=20.0, ge=5.0, le=200.0)
+    density: float = Field(default=2.0, ge=0.5, le=8.0)
+    seed: int | None = None  # granular only; None -> 42 (CLI parity)
+
+
 class _RenderBase(BaseModel):
     duration: float = Field(ge=0.05, le=60.0)
     sample_rate: int = Field(default=44100, ge=8000, le=96000)
@@ -245,6 +277,16 @@ class ModalRender(_RenderBase):
     params: ModalParams = Field(default_factory=ModalParams)
 
 
+class DatabendRender(BaseModel):
+    """Render request for databend mode (duration acts as a max-length cap)."""
+
+    mode: Literal["databend"]
+    duration: float = Field(ge=0.05, le=60.0)
+    params: DatabendParams = Field(default_factory=DatabendParams)
+    effects: EffectsParams = Field(default_factory=EffectsParams)
+    adsr: AdsrEnvelope = Field(default_factory=AdsrEnvelope)
+
+
 RenderModel = (
     RandomRender
     | BytebeatRender
@@ -257,6 +299,7 @@ RenderModel = (
     | RiserRender
     | DrumRender
     | ModalRender
+    | DatabendRender
 )
 RenderRequest = Annotated[RenderModel, Field(discriminator="mode")]
 
@@ -309,6 +352,10 @@ class ModalClip(ModalRender, _NamedMixin):
     """Save request for modal mode."""
 
 
+class DatabendClip(DatabendRender, _NamedMixin):
+    """Save request for databend mode."""
+
+
 ClipSaveRequest = Annotated[
     RandomClip
     | BytebeatClip
@@ -320,7 +367,8 @@ ClipSaveRequest = Annotated[
     | PluckClip
     | RiserClip
     | DrumClip
-    | ModalClip,
+    | ModalClip
+    | DatabendClip,
     Field(discriminator="mode"),
 ]
 
@@ -340,138 +388,193 @@ class ClipListResponse(BaseModel):
     clips: list[ClipInfo]
 
 
+class DatabendUploadInfo(BaseModel):
+    """Metadata for an in-memory databend upload."""
+
+    source: str  # 16-char hex token, valid in DatabendParams.source
+    filename: str  # as supplied by the client, display only
+    size_bytes: int
+
+
 class RevealRequest(BaseModel):
     """Request to reveal a clip (or the clips folder) in Finder."""
 
     filename: str | None = None
 
 
-def _synthesize(request: RenderModel) -> np.ndarray:
+def _resolve_databend_source(source: str) -> bytes:
+    """Return the bytes behind a databend source id, or raise 404."""
+    if source == "demo":
+        demo_path = DEMO_IMAGE_PATH
+        if not demo_path.is_file():
+            raise HTTPException(status_code=404, detail="Demo image missing on server")
+        return demo_path.read_bytes()
+    if source not in DATABEND_UPLOADS:
+        raise HTTPException(
+            status_code=404, detail="Unknown or expired source — upload the file again"
+        )
+    DATABEND_UPLOADS.move_to_end(source)
+    return DATABEND_UPLOADS[source][1]
+
+
+def _synthesize_databend(request: DatabendRender) -> tuple[np.ndarray, int]:
+    """Slice the source to the duration cap's byte budget and run the bend mode."""
+    p = request.params
+    data = _resolve_databend_source(p.source)
+    if p.bend == "audify":
+        sample_rate = p.sample_rate
+        budget = max(4, int(request.duration * sample_rate) * 4)  # 4 bytes/sample
+        samples = databend.mode_audify(data[:budget], sample_rate)
+    elif p.bend == "scale":
+        sample_rate = 44100  # forced by mode_scale
+        budget = max(
+            1, int(request.duration * p.bpm * p.divisions / 60.0)
+        )  # 1 byte/note
+        samples = databend.mode_scale(data[:budget], p.scale, p.bpm, p.divisions)
+    else:  # granular
+        sample_rate = 44100  # forced by mode_granular
+        budget = max(
+            1, int(request.duration * p.density * 44100)
+        )  # bytes ≈ s·density·sr
+        samples = databend.mode_granular(
+            data[:budget],
+            p.grain_ms,
+            p.density,
+            seed=42 if p.seed is None else p.seed,
+        )
+    return samples, sample_rate
+
+
+def _synthesize(request: RenderModel) -> tuple[np.ndarray, int]:
     """Generate samples for a render request and apply its effects and ADSR envelope."""
-    if isinstance(request, RandomRender):
-        samples = generate.generate_random_audio(
-            request.duration,
-            request.sample_rate,
-            color=request.params.color,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, BytebeatRender):
-        samples = generate.generate_bytebeat(
-            request.duration,
-            request.sample_rate,
-            a=request.params.a,
-            b=request.params.b,
-            c=request.params.c,
-            d=request.params.d,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, FmRender):
-        samples = generate.generate_fm(
-            request.duration,
-            request.sample_rate,
-            carrier=request.params.carrier,
-            ratio=request.params.ratio,
-            index=request.params.index,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, HarmonicsRender):
-        samples = generate.generate_harmonics(
-            request.duration,
-            request.sample_rate,
-            freq=request.params.freq,
-            count=request.params.count,
-            decay=request.params.decay,
-            stretch=request.params.stretch,
-            odd_only=request.params.odd_only,
-            drift=request.params.drift,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, SwarmRender):
-        samples = generate.generate_swarm(
-            request.duration,
-            request.sample_rate,
-            freq=request.params.freq,
-            voices=request.params.voices,
-            wave_shape=request.params.wave,
-            detune=request.params.detune,
-            drift=request.params.drift,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, GrainCloudRender):
-        samples = generate.generate_graincloud(
-            request.duration,
-            request.sample_rate,
-            density=request.params.density,
-            grain_ms=request.params.grain_ms,
-            pitch=request.params.pitch,
-            spread=request.params.spread,
-            source=request.params.source,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, CrackleRender):
-        samples = generate.generate_crackle(
-            request.duration,
-            request.sample_rate,
-            density=request.params.density,
-            tone=request.params.tone,
-            decay_ms=request.params.decay_ms,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, RiserRender):
-        samples = generate.generate_riser(
-            request.duration,
-            request.sample_rate,
-            freq=request.params.freq,
-            octaves=request.params.octaves,
-            voices=request.params.voices,
-            detune=request.params.detune,
-            noise_mix=request.params.noise_mix,
-            curve=request.params.curve,
-            direction=request.params.direction,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, DrumRender):
-        samples = generate.generate_drum(
-            request.duration,
-            request.sample_rate,
-            drum_type=request.params.drum_type,
-            tune=request.params.tune,
-            decay=request.params.decay,
-            tone=request.params.tone,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
-    elif isinstance(request, ModalRender):
-        samples = generate.generate_modal(
-            request.duration,
-            request.sample_rate,
-            freq=request.params.freq,
-            material=request.params.material,
-            decay=request.params.decay,
-            brightness=request.params.brightness,
-            interval=request.params.interval,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
+    if isinstance(request, DatabendRender):
+        samples, sample_rate = _synthesize_databend(request)
     else:
-        samples = generate.generate_pluck(
-            request.duration,
-            request.sample_rate,
-            freq=request.params.freq,
-            decay=request.params.decay,
-            interval=request.params.interval,
-            seed=request.params.seed,
-            stereo=request.stereo,
-        )
+        sample_rate = request.sample_rate
+        if isinstance(request, RandomRender):
+            samples = generate.generate_random_audio(
+                request.duration,
+                request.sample_rate,
+                color=request.params.color,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, BytebeatRender):
+            samples = generate.generate_bytebeat(
+                request.duration,
+                request.sample_rate,
+                a=request.params.a,
+                b=request.params.b,
+                c=request.params.c,
+                d=request.params.d,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, FmRender):
+            samples = generate.generate_fm(
+                request.duration,
+                request.sample_rate,
+                carrier=request.params.carrier,
+                ratio=request.params.ratio,
+                index=request.params.index,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, HarmonicsRender):
+            samples = generate.generate_harmonics(
+                request.duration,
+                request.sample_rate,
+                freq=request.params.freq,
+                count=request.params.count,
+                decay=request.params.decay,
+                stretch=request.params.stretch,
+                odd_only=request.params.odd_only,
+                drift=request.params.drift,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, SwarmRender):
+            samples = generate.generate_swarm(
+                request.duration,
+                request.sample_rate,
+                freq=request.params.freq,
+                voices=request.params.voices,
+                wave_shape=request.params.wave,
+                detune=request.params.detune,
+                drift=request.params.drift,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, GrainCloudRender):
+            samples = generate.generate_graincloud(
+                request.duration,
+                request.sample_rate,
+                density=request.params.density,
+                grain_ms=request.params.grain_ms,
+                pitch=request.params.pitch,
+                spread=request.params.spread,
+                source=request.params.source,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, CrackleRender):
+            samples = generate.generate_crackle(
+                request.duration,
+                request.sample_rate,
+                density=request.params.density,
+                tone=request.params.tone,
+                decay_ms=request.params.decay_ms,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, RiserRender):
+            samples = generate.generate_riser(
+                request.duration,
+                request.sample_rate,
+                freq=request.params.freq,
+                octaves=request.params.octaves,
+                voices=request.params.voices,
+                detune=request.params.detune,
+                noise_mix=request.params.noise_mix,
+                curve=request.params.curve,
+                direction=request.params.direction,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, DrumRender):
+            samples = generate.generate_drum(
+                request.duration,
+                request.sample_rate,
+                drum_type=request.params.drum_type,
+                tune=request.params.tune,
+                decay=request.params.decay,
+                tone=request.params.tone,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        elif isinstance(request, ModalRender):
+            samples = generate.generate_modal(
+                request.duration,
+                request.sample_rate,
+                freq=request.params.freq,
+                material=request.params.material,
+                decay=request.params.decay,
+                brightness=request.params.brightness,
+                interval=request.params.interval,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
+        else:
+            samples = generate.generate_pluck(
+                request.duration,
+                request.sample_rate,
+                freq=request.params.freq,
+                decay=request.params.decay,
+                interval=request.params.interval,
+                seed=request.params.seed,
+                stereo=request.stereo,
+            )
     samples = generate.apply_effects(
         samples,
-        request.sample_rate,
+        sample_rate,
         drive=request.effects.drive,
         fold=request.effects.fold,
         crush_bits=request.effects.crush_bits,
@@ -481,14 +584,15 @@ def _synthesize(request: RenderModel) -> np.ndarray:
         resonance=request.effects.resonance,
         cutoff_end=request.effects.cutoff_end,
     )
-    return generate.apply_adsr(
+    samples = generate.apply_adsr(
         samples,
-        request.sample_rate,
+        sample_rate,
         attack=request.adsr.attack,
         decay=request.adsr.decay,
         sustain=request.adsr.sustain,
         release=request.adsr.release,
     )
+    return samples, sample_rate
 
 
 def _wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
@@ -547,16 +651,34 @@ def _clip_info(path: Path) -> ClipInfo:
 @app.post("/api/render")
 def render_audio(request: RenderRequest) -> Response:
     """Render the requested audio and return it as WAV bytes."""
-    samples = _synthesize(request)
-    return Response(
-        content=_wav_bytes(samples, request.sample_rate), media_type="audio/wav"
-    )
+    samples, sample_rate = _synthesize(request)
+    return Response(content=_wav_bytes(samples, sample_rate), media_type="audio/wav")
+
+
+@app.post("/api/databend/upload")
+async def upload_databend_source(
+    request: Request, filename: str = "upload"
+) -> DatabendUploadInfo:
+    """Store raw file bytes in memory and return a source token for renders."""
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty upload")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"File too large (limit {MAX_UPLOAD_BYTES} bytes)"
+        )
+    while len(DATABEND_UPLOADS) >= MAX_UPLOADS:
+        DATABEND_UPLOADS.popitem(last=False)  # LRU eviction
+    source = secrets.token_hex(8)
+    DATABEND_UPLOADS[source] = (filename, data)
+    return DatabendUploadInfo(source=source, filename=filename, size_bytes=len(data))
 
 
 @app.post("/api/clips")
 def save_clip(request: ClipSaveRequest) -> ClipInfo:
     """Render the requested audio and save it as a named clip."""
-    data = _wav_bytes(_synthesize(request), request.sample_rate)
+    samples, sample_rate = _synthesize(request)
+    data = _wav_bytes(samples, sample_rate)
     clips_dir = CLIPS_DIR
     clips_dir.mkdir(parents=True, exist_ok=True)
     path = _unique_clip_path(clips_dir, _slugify(request.name))

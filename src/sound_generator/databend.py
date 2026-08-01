@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.io import wavfile  # type: ignore[import-untyped]
 
 SAMPLE_RATE = 44100
 
@@ -180,6 +179,7 @@ def mode_granular(
     data: bytes,
     grain_ms: float,
     density: float,
+    seed: int = 42,
 ) -> np.ndarray:
     """Use bytes as amplitude envelopes over noise grains.
 
@@ -191,6 +191,8 @@ def mode_granular(
         data: Raw file bytes.
         grain_ms: Grain duration in milliseconds.
         density: Overlap factor — 1.0 = adjacent grains, 2.0 = 50% overlap.
+        seed: RNG seed for the grain noise. Defaults to 42, the historical
+            fixed seed, so CLI output is unchanged.
 
     Returns:
         Float32 audio array.
@@ -215,7 +217,7 @@ def mode_granular(
         f"{total_samples / SAMPLE_RATE:.2f}s"
     )
 
-    rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng(seed=seed)
 
     for i in range(n_grains):
         grain_bytes = arr[i * grain_n : (i + 1) * grain_n]
@@ -251,6 +253,9 @@ def write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
         samples: Float32 audio data normalised to [-1, 1].
         sample_rate: Sample rate in Hz.
     """
+    # Lazy import keeps scipy off the package's default import path.
+    from scipy.io import wavfile  # type: ignore[import-untyped]
+
     # Clip and convert to int16 for maximum DAW compatibility
     clipped = np.clip(samples, -1.0, 1.0)
     int16 = (clipped * 32767).astype(np.int16)

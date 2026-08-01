@@ -84,7 +84,8 @@ body {
 
 .tabs {
   display: grid;
-  /* 8 tabs auto-wrap into two rows of four; minmax(0) stops label overflow */
+  /* Tabs auto-wrap into rows of four (12 tabs = three rows); minmax(0)
+     stops label overflow */
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   background: var(--inset);
@@ -220,6 +221,8 @@ select {
   font-size: 12px;
   padding: 6px 7px;
 }
+
+select:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .field { margin-bottom: 12px; }
 
@@ -525,3 +528,44 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .toast-error { border-color: var(--danger); color: #f0a0a0; }
+
+/* -------------------------- Databend source ---------------------------- */
+
+.bend-source img {
+  display: block;
+  width: 100%;
+  /* Cap at the two-column layout's 360px left panel minus its padding,
+     so the single-column layout doesn't blow the preview up to window width. */
+  max-width: 326px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-edge);
+}
+
+.bend-source.dragover {
+  outline: 1px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+.bend-caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.bend-source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bend-source-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}

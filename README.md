@@ -34,7 +34,8 @@ uv run uvicorn ui.server:app --port 9000
 
 Saved clips land in `clips/` at the repo root (created on first save, gitignored).
 
-- **Modes** — Noise / Bytebeat / FM / Harmonics / Swarm / Cloud / Crackle / Pluck / Riser / Drums / Modal tabs expose every CLI parameter as a slider (hover any control for an explanation), plus the ADSR envelope, the effects chain (drive / wavefolder / bitcrusher / resonant filter), a stereo toggle, and a global seed control (pin a seed for reproducible textures; unpinned renders reroll on Generate and the saved clip always matches the last preview).
+- **Modes** — Noise / Bytebeat / FM / Harmonics / Swarm / Cloud / Crackle / Pluck / Riser / Drums / Modal / Databend tabs expose every CLI parameter as a slider (hover any control for an explanation), plus the ADSR envelope, the effects chain (drive / wavefolder / bitcrusher / resonant filter), a stereo toggle, and a global seed control (pin a seed for reproducible textures; unpinned renders reroll on Generate and the saved clip always matches the last preview).
+- **Databend tab** — [databending](#approach-2--databending-databend) from the browser: sonify the bundled demo image (Claude Monet, *Water Lilies*, 1906 — public domain) or upload/drag-drop any file (16 MB max, held in server memory). All three bend modes are available — audify, scale, and granular — with the duration slider acting as the length cap and the seed driving granular's grain noise. Output is mono; the effects chain, envelope, and clip library work as on every other tab.
 - **Pre-listen** — clips render on the fly (auto-rerender as you drag sliders) and play in the browser with loop and gain control; the waveform is drawn on a canvas. A **Randomize** button rolls a fresh patch: random values for the current mode's parameters and the effects chain (frequencies drawn log-uniform, effects kept tasteful), leaving the envelope, duration, and output settings untouched.
 - **Clip library** — save named takes to the `clips/` folder, with per-clip download, reveal-in-Finder, and delete. Dragging a clip out of the browser works onto Finder/Desktop (Chrome delivers it as a file promise). **Ableton ignores browser drags** — it only accepts real file paths — so add the `clips/` folder to Live's browser sidebar once (**Places → Add Folder…**): every saved clip then appears directly in Ableton with native preview and drag. Or use the per-clip reveal button and drag from Finder.
 
@@ -426,7 +427,7 @@ uv run generate 8 --swarm --crush-bits 10 --filter lowpass --cutoff 200 --cutoff
 
 **Databending** is the art of feeding a non-audio file — an image, an executable, a Word document, anything — into an audio engine as if it were sound. The file's binary content becomes the waveform. The results range from harsh electronic noise to structured melodies to dense granular drones, depending on the technique used.
 
-This script implements three distinct databending modes in pure Python, producing standard WAV files compatible with any DAW (Ableton, Logic, Reaper, etc.).
+This script implements three distinct databending modes in pure Python, producing standard WAV files compatible with any DAW (Ableton, Logic, Reaper, etc.). All three are also available interactively in the [web UI](#web-ui--quick-start)'s **Databend** tab.
 
 ### Background
 

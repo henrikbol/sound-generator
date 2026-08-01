@@ -24,3 +24,6 @@ clips/
 
 # README assets are tracked despite the image ignores above
 !docs/screenshot.png
+
+# Databend demo image is tracked despite the image ignores above
+!ui/static/databend-demo.jpg

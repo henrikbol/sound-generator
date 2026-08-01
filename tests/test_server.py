@@ -2,6 +2,7 @@
 
 import os
 import wave
+from collections import OrderedDict
 from io import BytesIO
 from pathlib import Path
 
@@ -18,6 +19,7 @@ SAMPLE_RATE = 22050
 def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
     """Return a test client whose CLIPS_DIR points at a temp directory."""
     monkeypatch.setattr(server, "CLIPS_DIR", tmp_path)
+    monkeypatch.setattr(server, "DATABEND_UPLOADS", OrderedDict())
     return TestClient(server.app)
 
 
@@ -458,3 +460,209 @@ def test_index_reports_missing_ui_then_serves_it(
     response = client.get("/")
     assert response.status_code == 200
     assert "sound generator" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Databend
+# ---------------------------------------------------------------------------
+
+DEMO_BYTES = bytes(range(256)) * 16  # 4096 deterministic bytes
+
+
+@pytest.fixture
+def demo_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the databend demo image at a small deterministic byte file."""
+    demo = tmp_path / "demo.bin"
+    demo.write_bytes(DEMO_BYTES)
+    monkeypatch.setattr(server, "DEMO_IMAGE_PATH", demo)
+    return demo
+
+
+def bend_body(duration: float = 0.5, **params: object) -> dict[str, object]:
+    """Return a baseline databend render body, with params overridden by kwargs."""
+    baseline: dict[str, object] = {
+        "bend": "granular",
+        "source": "demo",
+        "sample_rate": 44100,
+        "scale": "pentatonic",
+        "bpm": 120.0,
+        "divisions": 4,
+        "grain_ms": 20.0,
+        "density": 2.0,
+        "seed": 7,
+    }
+    baseline.update(params)
+    return {"mode": "databend", "duration": duration, "params": baseline}
+
+
+@pytest.mark.parametrize(
+    ("bend", "rate", "expected_rate"),
+    [
+        pytest.param("audify", 44100, 44100, id="audify"),
+        pytest.param("audify", 22050, 22050, id="audify-rate-param"),
+        pytest.param("scale", 44100, 44100, id="scale"),
+        pytest.param("scale", 22050, 44100, id="scale-rate-forced"),
+        pytest.param("granular", 44100, 44100, id="granular"),
+        pytest.param("granular", 22050, 44100, id="granular-rate-forced"),
+    ],
+)
+def test_databend_render_each_bend(
+    client: TestClient, demo_source: Path, bend: str, rate: int, expected_rate: int
+) -> None:
+    response = client.post("/api/render", json=bend_body(bend=bend, sample_rate=rate))
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    with wave.open(BytesIO(response.content), "rb") as wav_file:
+        assert wav_file.getnchannels() == 1
+        assert wav_file.getsampwidth() == 2
+        assert wav_file.getframerate() == expected_rate
+
+
+def test_databend_duration_cap_audify(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    big = tmp_path / "big.bin"
+    big.write_bytes(bytes(range(256)) * 400)  # 102,400 bytes > the 88,200 budget
+    monkeypatch.setattr(server, "DEMO_IMAGE_PATH", big)
+    response = client.post("/api/render", json=bend_body(duration=0.5, bend="audify"))
+    assert response.status_code == 200
+    with wave.open(BytesIO(response.content), "rb") as wav_file:
+        assert wav_file.getframerate() == 44100
+        assert wav_file.getnframes() == int(0.5 * 44100)
+
+
+def test_databend_scale_note_budget(client: TestClient, demo_source: Path) -> None:
+    response = client.post(
+        "/api/render",
+        json=bend_body(duration=2.0, bend="scale", bpm=120.0, divisions=4),
+    )
+    assert response.status_code == 200
+    notes = int(2.0 * 120.0 * 4 / 60.0)  # 16 notes
+    note_samples = int(44100 * 60.0 / 120.0 / 4)  # 0.125 s notes -> 5512
+    with wave.open(BytesIO(response.content), "rb") as wav_file:
+        assert wav_file.getnframes() == notes * note_samples
+
+
+def test_databend_unknown_source_404(client: TestClient) -> None:
+    response = client.post("/api/render", json=bend_body(source="0123456789abcdef"))
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("source", ["../etc/passwd", "ABCD"])
+def test_databend_bad_source_rejected(client: TestClient, source: str) -> None:
+    assert client.post("/api/render", json=bend_body(source=source)).status_code == 422
+
+
+def test_databend_missing_duration_rejected(client: TestClient) -> None:
+    body = bend_body()
+    del body["duration"]
+    assert client.post("/api/render", json=body).status_code == 422
+
+
+def test_databend_upload_render_round_trip(client: TestClient) -> None:
+    upload = client.post("/api/databend/upload?filename=demo.bin", content=DEMO_BYTES)
+    assert upload.status_code == 200
+    info = upload.json()
+    assert len(info["source"]) == 16
+    assert set(info["source"]) <= set("0123456789abcdef")
+    assert info["filename"] == "demo.bin"
+    assert info["size_bytes"] == len(DEMO_BYTES)
+    for bend in ["audify", "scale", "granular"]:
+        response = client.post(
+            "/api/render", json=bend_body(bend=bend, source=info["source"])
+        )
+        assert response.status_code == 200
+        with wave.open(BytesIO(response.content), "rb") as wav_file:
+            assert wav_file.getnchannels() == 1
+            assert wav_file.getnframes() > 0
+
+
+def test_databend_upload_empty_422(client: TestClient) -> None:
+    assert client.post("/api/databend/upload", content=b"").status_code == 422
+
+
+def test_databend_upload_too_large_413(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server, "MAX_UPLOAD_BYTES", 1024)
+    response = client.post("/api/databend/upload", content=bytes(2048))
+    assert response.status_code == 413
+
+
+def test_databend_upload_lru_eviction(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server, "MAX_UPLOADS", 2)
+    tokens = [
+        client.post(
+            f"/api/databend/upload?filename=file-{i}", content=DEMO_BYTES
+        ).json()["source"]
+        for i in range(3)
+    ]
+    evicted = client.post("/api/render", json=bend_body(source=tokens[0]))
+    kept = client.post("/api/render", json=bend_body(source=tokens[2]))
+    assert evicted.status_code == 404
+    assert kept.status_code == 200
+
+
+def test_databend_granular_seed_determinism(
+    client: TestClient, demo_source: Path
+) -> None:
+    body = bend_body(seed=7)
+    first = client.post("/api/render", json=body)
+    second = client.post("/api/render", json=body)
+    reseeded = client.post("/api/render", json=bend_body(seed=8))
+    assert first.status_code == 200
+    assert reseeded.status_code == 200
+    assert first.content == second.content
+    assert first.content != reseeded.content
+
+
+def test_databend_effects_noop_bit_exact(client: TestClient, demo_source: Path) -> None:
+    body = bend_body(seed=11)
+    plain = client.post("/api/render", json=body)
+    explicit = client.post(
+        "/api/render",
+        json={
+            **body,
+            "effects": {
+                "drive": 0.0,
+                "fold": 0.0,
+                "crush_bits": 16,
+                "crush_rate": 0.0,
+                "filter_type": "off",
+                "cutoff": 1000.0,
+                "resonance": 0.707,
+                "cutoff_end": 0.0,
+            },
+        },
+    )
+    assert plain.status_code == 200
+    assert explicit.status_code == 200
+    assert plain.content == explicit.content
+
+
+def test_databend_clip_round_trip(
+    client: TestClient, demo_source: Path, tmp_path: Path
+) -> None:
+    body = {**bend_body(seed=3), "name": "Bent Monet"}
+    saved_response = client.post("/api/clips", json=body)
+    assert saved_response.status_code == 200
+    saved = saved_response.json()
+    assert saved["filename"] == "bent-monet.wav"
+    assert (tmp_path / "bent-monet.wav").exists()
+
+    listing = client.get("/api/clips").json()
+    assert "bent-monet.wav" in [clip["filename"] for clip in listing["clips"]]
+
+    served = client.get("/clips/bent-monet.wav")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "audio/wav"
+    assert served.content == (tmp_path / "bent-monet.wav").read_bytes()
+
+
+def test_databend_demo_missing_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(server, "DEMO_IMAGE_PATH", tmp_path / "missing.jpg")
+    assert client.post("/api/render", json=bend_body()).status_code == 404
